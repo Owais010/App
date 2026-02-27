@@ -14,10 +14,11 @@ export default function Quiz() {
     const subject = searchParams.get('subject') || 'mathematics'
     const count = Math.min(Number(searchParams.get('count')) || 5, 10)
 
-    const questions = useMemo(
-        () => (quizQuestions[subject] || quizQuestions.mathematics).slice(0, count),
-        [subject, count]
-    )
+    const questions = useMemo(() => {
+        // Find questions for the subject, fallback to 'data-structures' if it exists to prevent crashes
+        const qList = quizQuestions[subject] || quizQuestions['data-structures'] || []
+        return qList.slice(0, count)
+    }, [subject, count])
 
     const [currentIndex, setCurrentIndex] = useState(0)
     const [selected, setSelected] = useState(null)
@@ -80,7 +81,13 @@ export default function Quiz() {
         return `${m}:${sec.toString().padStart(2, '0')}`
     }
 
-    const q = questions[currentIndex]
+    const q = questions[currentIndex] || {
+        id: -1,
+        question: 'No questions available for this subject yet.',
+        options: ['Return to Setup'],
+        topic: 'Error',
+        correct: 0
+    }
     const timerWarning = timeLeft < 30
 
     const slideVariants = {
@@ -103,8 +110,8 @@ export default function Quiz() {
                             Exit
                         </button>
                         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${timerWarning
-                                ? 'bg-red-500/10 text-red-400'
-                                : 'bg-surface-100 dark:bg-white/[0.04] text-surface-600 dark:text-surface-300'
+                            ? 'bg-red-500/10 text-red-400'
+                            : 'bg-surface-100 dark:bg-white/[0.04] text-surface-600 dark:text-surface-300'
                             }`}>
                             <Clock size={14} className={timerWarning ? 'animate-pulse' : ''} />
                             <span className="font-heading text-sm font-semibold">
@@ -155,14 +162,14 @@ export default function Quiz() {
                                     whileTap={{ scale: 0.99 }}
                                     onClick={() => setSelected(i)}
                                     className={`w-full text-left px-5 py-4 rounded-xl border-2 cursor-pointer transition-all duration-200 flex items-center gap-4 ${selected === i
-                                            ? 'border-primary bg-primary/5 dark:bg-primary/10 shadow-glow/20'
-                                            : 'border-surface-200 dark:border-white/[0.06] hover:border-primary/30 bg-white dark:bg-surface-800/40'
+                                        ? 'border-primary bg-primary/5 dark:bg-primary/10 shadow-glow/20'
+                                        : 'border-surface-200 dark:border-white/[0.06] hover:border-primary/30 bg-white dark:bg-surface-800/40'
                                         }`}
                                 >
                                     <span
                                         className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-heading font-bold flex-shrink-0 transition-colors ${selected === i
-                                                ? 'bg-primary text-white'
-                                                : 'bg-surface-100 dark:bg-white/[0.06] text-surface-500'
+                                            ? 'bg-primary text-white'
+                                            : 'bg-surface-100 dark:bg-white/[0.06] text-surface-500'
                                             }`}
                                     >
                                         {i + 1}
