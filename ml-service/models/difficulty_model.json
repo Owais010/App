@@ -1,0 +1,40 @@
+{
+  "model_type": "RandomForestClassifier",
+  "target": "difficulty_level",
+  "labels": {
+    "0": "easy",
+    "1": "medium",
+    "2": "hard"
+  },
+  "trained_at": "2026-02-28T04:44:14.691587+00:00",
+  "n_samples": 5000,
+  "n_features": 14,
+  "feature_names": [
+    "attempt_count",
+    "correct_attempts",
+    "avg_response_time",
+    "self_confidence_rating",
+    "difficulty_feedback",
+    "session_duration",
+    "previous_mastery_score",
+    "time_since_last_attempt",
+    "accuracy_rate",
+    "failure_rate",
+    "learning_velocity",
+    "confidence_performance_gap",
+    "difficulty_stress_index",
+    "persistence_score"
+  ],
+  "hyperparameters": {
+    "n_estimators": 100,
+    "max_depth": 10,
+    "class_weight": "balanced",
+    "random_state": 42
+  },
+  "metrics": {
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "cv_accuracy_mean": 1.0,
+    "cv_accuracy_std": null
+  }
+}

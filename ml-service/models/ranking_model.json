@@ -1,0 +1,57 @@
+{
+  "model_type": "GradientBoostingRegressor",
+  "target": "engagement_success_score",
+  "trained_at": "2026-02-28T04:44:28.289551+00:00",
+  "n_samples": 5000,
+  "n_features": 14,
+  "feature_names": [
+    "attempt_count",
+    "correct_attempts",
+    "avg_response_time",
+    "self_confidence_rating",
+    "difficulty_feedback",
+    "session_duration",
+    "previous_mastery_score",
+    "time_since_last_attempt",
+    "accuracy_rate",
+    "failure_rate",
+    "learning_velocity",
+    "confidence_performance_gap",
+    "difficulty_stress_index",
+    "persistence_score"
+  ],
+  "hyperparameters": {
+    "n_estimators": 100,
+    "learning_rate": 0.1,
+    "max_depth": 5,
+    "random_state": 42,
+    "loss": "squared_error"
+  },
+  "metrics": {
+    "train_mae": 0.0028,
+    "train_rmse": 0.0038,
+    "train_r2": 0.9996,
+    "test_mae": 0.0048,
+    "test_rmse": 0.0067,
+    "test_r2": 0.9989,
+    "cv_r2_mean": 0.9988,
+    "cv_r2_std": 0.0,
+    "feature_importance": {
+      "failure_rate": 0.4423,
+      "accuracy_rate": 0.326,
+      "persistence_score": 0.2126,
+      "difficulty_stress_index": 0.0077,
+      "previous_mastery_score": 0.0073,
+      "confidence_performance_gap": 0.0022,
+      "self_confidence_rating": 0.001,
+      "correct_attempts": 0.0006,
+      "session_duration": 0.0001,
+      "attempt_count": 0.0001,
+      "learning_velocity": 0.0,
+      "time_since_last_attempt": 0.0,
+      "avg_response_time": 0.0,
+      "difficulty_feedback": 0.0
+    }
+  },
+  "label_formula": "engagement_score = 0.4 * accuracy_rate + 0.3 * persistence_score + 0.3 * (1 - gap_score)"
+}

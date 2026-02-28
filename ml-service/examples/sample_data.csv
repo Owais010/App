@@ -1,0 +1,11 @@
+user_id,topic_id,attempt_count,correct_attempts,avg_response_time,self_confidence_rating,difficulty_feedback,session_duration,previous_mastery_score,time_since_last_attempt
+user_00001,topic_042,5,4,38.25,0.72,2,18.5,0.65,12.0
+user_00002,topic_015,12,6,65.80,0.45,4,35.0,0.40,48.0
+user_00003,topic_089,8,7,22.10,0.85,2,12.5,0.78,6.0
+user_00004,topic_023,20,5,95.50,0.30,5,45.0,0.25,72.0
+user_00005,topic_067,15,12,30.00,0.80,3,25.0,0.70,24.0
+user_00006,topic_034,3,3,15.00,0.95,1,8.0,0.90,2.0
+user_00007,topic_078,25,8,80.00,0.35,5,55.0,0.30,96.0
+user_00008,topic_012,10,8,28.50,0.75,2,20.0,0.72,18.0
+user_00009,topic_056,7,3,55.00,0.50,4,22.0,0.45,36.0
+user_00010,topic_091,18,15,25.00,0.88,2,30.0,0.82,12.0
