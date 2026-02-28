@@ -1,56 +1,87 @@
-Step 1: Navigate to ML Service Directory
-cd c:\Users\anilr\pathfinder-learn\ml-service
-Step 2: Create Virtual Environment
-python -m venv venv
-Step 3: Activate Virtual Environment
-.\venv\Scripts\Activate.ps1
-You should see (venv) appear in your terminal prompt
-Step 4: Install Dependencies
-pip install -r requirements.txt
-Step 5: Verify Models Exist
-Get-ChildItem .\models\*.pkl
-Should show 3 model files: difficulty_model.pkl, ranking_model.pkl, skill_gap_model.pkl
+# Quick Start Guide: AdaptiQ ML Service & Web Setup
 
-If models are missing, train them:
+This guide provides step-by-step instructions to get the platform (both the React Frontend and the ML Service) up and running after cloning the repository.
+
+---
+
+## 🏗️ 1. Setup the ML Backend Service
+
+Open a new terminal window and navigate to the ML service folder:
+```powershell
+cd ml-service
+```
+
+### A. Create and Activate Virtual Environment
+Create a clean Python environment to avoid dependency conflicts:
+```powershell
+python -m venv venv
+```
+Activate it:
+* **Windows (PowerShell):** `.\venv\Scripts\Activate.ps1`
+* **Windows (Command Prompt):** `.\venv\Scripts\activate.bat`
+* **Mac/Linux:** `source venv/bin/activate`
+
+*(You should see `(venv)` appear in your terminal prompt)*
+
+### B. Install Dependencies
+```powershell
+pip install -r requirements.txt
+```
+
+### C. Verify / Train Models
+Check if models exist in the `models/` directory:
+```powershell
+Get-ChildItem .\models\*.pkl   # Windows
+# or
+ls ./models/*.pkl              # Mac/Linux
+```
+If you don't see `difficulty_model.pkl`, `ranking_model.pkl`, and `skill_gap_model.pkl`, you need to train them first:
+```powershell
 python training/generate_data.py
 python training/train_all.py
-Step 6: Start the ML Service
+```
+
+### D. Start the ML Service
+```powershell
 uvicorn app.main:app --host 0.0.0.0 --port 8000
-Keep this terminal open - the service runs here
-Step 7: Test the Service (Open New Terminal)
-Health Check:
-Invoke-RestMethod -Uri "http://localhost:8000/health"
-Expected output:
-status        models_loaded version
-------        ------------- -------
-healthy       True          1.0.0
-Test Prediction:
-$json = '{"user_id":"test","topic_id":"math","attempt_count":10,"correct_attempts":7,"avg_response_time":20,"self_confidence_rating":0.7,"difficulty_feedback":3,"session_duration":30,"previous_mastery_score":0.5,"time_since_last_attempt":24}'
+```
+> **Leave this terminal open!** The ML service must stay running in the background.
 
-Invoke-RestMethod -Uri "http://localhost:8000/predict" -Method Post -Body $json -ContentType "application/json"
-Step 8: Access API Documentation
-Open browser and go to:
+---
 
-Swagger UI: http://localhost:8000/docs
-ReDoc: http://localhost:8000/redoc
-Step 9: Stop the Service
-Press Ctrl + C in the terminal running uvicorn
+## 🎨 2. Setup the React Frontend
 
-Quick Copy-Paste (All Commands)
-# Run these in sequence
-cd c:\Users\anilr\pathfinder-learn\ml-service
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-API Endpoints Summary
-Endpoint	Method	Description
-/health	GET	Check if service is running
-/predict	POST	Get ML predictions
-/metrics	GET	Prometheus metrics
-/docs	GET	Interactive API docs
-Troubleshooting
-Issue	Solution
-ModuleNotFoundError	Make sure you're in ml-service folder and venv is activated
-Port 8000 in use	Use --port 8001 instead
-Models not found	Run python training/train_all.py
+Open a **second** new terminal window and navigate to the project root (where `package.json` is located - typically one folder up from `ml-service`):
+
+### A. Install Node Dependencies
+```powershell
+npm install
+```
+
+### B. Start the Development Server
+```powershell
+npm run dev
+```
+
+The terminal will provide a local URL (usually `http://localhost:5173/`). Hold `Ctrl` and click the link to open the app in your browser.
+
+---
+
+## 🧪 3. Testing the Integration
+
+To verify everything is connected correctly:
+1. Go to the `Quiz` section on the website.
+2. Complete a quiz session.
+3. At the end, you'll see a Feedback modal. Fill it out and submit.
+4. On the `Results` dashboard, look for the **AdaptiQ Engine Insights 🧠** panel. If it loads with personalized AI metrics (Skill Gap, Recommended Action), the integration is successful!
+
+---
+
+## 🔧 Troubleshooting
+
+| Issue | Solution |
+| :--- | :--- |
+| `uvicorn: The term 'uvicorn' is not recognized` | Ensure you have activated your virtual environment (`.\venv\Scripts\Activate.ps1`) before running the command. |
+| `ModuleNotFoundError` | Make sure you're in the `ml-service` folder and `venv` is activated before running python files. |
+| `Port 8000 in use` | Change the backend port: `uvicorn app.main:app --port 8001`, and update `VITE_ML_API_URL` in your frontend `.env` file. |
+| ML Insights fail to load on frontend | Ensure the FastAPI terminal (running `uvicorn`) is still open and running without errors. Check the Network tab in your browser's Developer Tools. |
