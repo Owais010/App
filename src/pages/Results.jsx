@@ -14,6 +14,8 @@ import Button from '../components/Button'
 import { ProgressRing } from '../components/ProgressBar'
 import PageTransition from '../components/PageTransition'
 import { performanceData } from '../data'
+import { useAuth } from '../context/AuthContext'
+import { getMLPrediction } from '../lib/mlService'
 
 function getBadge(score) {
     if (score >= 90) return { label: 'Outstanding', color: '#6C63FF', icon: Trophy }
@@ -26,8 +28,13 @@ export default function Results() {
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
     const location = useLocation()
+    const { user } = useAuth()
     const subject = searchParams.get('subject') || 'mathematics'
-    const { answers = [], questions = [], timeSpent = 0 } = location.state || {}
+    const { answers = [], questions = [], timeSpent = 0, telemetry } = location.state || {}
+
+    const [mlData, setMlData] = useState(null)
+    const [mlLoading, setMlLoading] = useState(false)
+    const [mlError, setMlError] = useState(null)
 
     const score = useMemo(() => {
         if (!questions.length) return 0
@@ -39,6 +46,38 @@ export default function Results() {
 
     const badge = getBadge(score)
     const BadgeIcon = badge.icon
+
+    useEffect(() => {
+        const fetchMLData = async () => {
+            if (!telemetry || !user) return;
+            setMlLoading(true);
+            try {
+                // Mocking historical data until backend fully supports tracking this
+                const payload = {
+                    user_id: user.id || 'anonymous_user',
+                    topic_id: subject,
+                    attempt_count: 5,
+                    correct_attempts: answers.filter((a, i) => questions[i] && a.selected === questions[i].correct).length,
+                    avg_response_time: Math.max(0.1, telemetry.avg_response_time),
+                    self_confidence_rating: telemetry.self_confidence_rating,
+                    difficulty_feedback: telemetry.difficulty_feedback,
+                    session_duration: Math.max(0.1, telemetry.session_duration),
+                    previous_mastery_score: 0.5,
+                    time_since_last_attempt: 24
+                };
+
+                const data = await getMLPrediction(payload);
+                setMlData(data);
+            } catch (err) {
+                console.error("Failed to fetch ML Prediction:", err);
+                setMlError(err.message);
+            } finally {
+                setMlLoading(false);
+            }
+        };
+
+        fetchMLData();
+    }, [telemetry, user, subject, answers, questions]);
 
     useEffect(() => {
         if (score >= 80) {
@@ -151,6 +190,57 @@ export default function Results() {
                             <p className="text-xs text-surface-400 mt-1">{stat.label}</p>
                         </Card>
                     ))}
+                </motion.div>
+
+                {/* ML Insights */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.65 }}
+                    className="mb-8"
+                >
+                    <Card hover={false} className="relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-2 shrink-0 bg-primary h-full"></div>
+                        <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4 ml-2">
+                            AdaptiQ Engine Insights 🧠
+                        </h3>
+                        {mlLoading ? (
+                            <div className="flex justify-center items-center h-24 ml-2">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                            </div>
+                        ) : mlError ? (
+                            <p className="text-red-500 text-sm ml-2">Failed to load AI insights: {mlError}</p>
+                        ) : mlData ? (
+                            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 ml-2">
+                                <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
+                                    <p className="text-xs text-surface-400 mb-1">Recommended Action</p>
+                                    <p className="font-heading font-semibold text-primary capitalize">
+                                        {mlData.adaptation?.action?.replace(/_/g, ' ')}
+                                    </p>
+                                </div>
+                                <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
+                                    <p className="text-xs text-surface-400 mb-1">Estimated Skill Gap</p>
+                                    <p className={`font-heading font-semibold ${mlData.skill_gap?.weak ? 'text-red-500' : 'text-green-500'}`}>
+                                        {(mlData.skill_gap?.gap_score * 100).toFixed(1)}%
+                                    </p>
+                                </div>
+                                <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
+                                    <p className="text-xs text-surface-400 mb-1">Difficulty Fit</p>
+                                    <p className="font-heading font-semibold text-surface-700 dark:text-surface-300 capitalize">
+                                        {mlData.difficulty?.difficulty_level}
+                                    </p>
+                                </div>
+                                <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
+                                    <p className="text-xs text-surface-400 mb-1">Next Topic Rank</p>
+                                    <p className="font-heading font-semibold text-purple-500">
+                                        {(mlData.ranking?.ranking_score * 10).toFixed(1)} / 10
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-surface-400 ml-2">No AI insights generated. Please complete a quiz with telemetry data to see predictions.</p>
+                        )}
+                    </Card>
                 </motion.div>
 
                 {/* Radar Chart */}
