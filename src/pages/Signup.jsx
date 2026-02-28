@@ -41,11 +41,16 @@ export default function Signup() {
         if (!validate()) return
         setLoading(true)
         try {
-            await signUp(email, password)
-            toast.success('Account created! Welcome to AdaptIQ.')
-            // Redirect happens automatically via useEffect when user state updates
+            const data = await signUp(email, password)
+            if (data?.session) {
+                toast.success('Account created! Welcome to AdaptIQ.')
+            } else {
+                toast.success('Account created! Please check your email to verify your account.')
+                navigate('/login')
+            }
         } catch (err) {
             toast.error(err.message || 'Failed to create account')
+        } finally {
             setLoading(false)
         }
     }
