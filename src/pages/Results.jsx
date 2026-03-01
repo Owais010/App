@@ -47,6 +47,8 @@ export default function Results() {
     const badge = getBadge(score)
     const BadgeIcon = badge.icon
 
+    const [displayScore, setDisplayScore] = useState(0)
+
     useEffect(() => {
         const fetchMLData = async () => {
             if (!telemetry || !user) return;
@@ -80,9 +82,26 @@ export default function Results() {
     }, [telemetry, user, subject, answers, questions]);
 
     useEffect(() => {
+        // Animate score from 0 to actual score
+        const duration = 1500;
+        const start = Date.now();
+        const end = start + duration;
+
+        const animateScore = () => {
+            const now = Date.now();
+            const progress = Math.min((now - start) / duration, 1);
+            // Ease out cubic
+            const easeProgress = 1 - Math.pow(1 - progress, 3);
+            setDisplayScore(Math.round(score * easeProgress));
+
+            if (progress < 1) {
+                requestAnimationFrame(animateScore);
+            }
+        };
+        requestAnimationFrame(animateScore);
+
         if (score >= 80) {
-            const duration = 2000
-            const end = Date.now() + duration
+            const endConfetti = Date.now() + 2000
             const frame = () => {
                 confetti({
                     particleCount: 3,
@@ -166,7 +185,7 @@ export default function Results() {
                             {score >= 80 ? 'Excellent Work!' : score >= 50 ? 'Good Effort!' : 'Keep Practicing!'}
                         </h1>
                         <p className="text-surface-500 dark:text-surface-400">
-                            You scored {score}% in {questions.length} questions · {formatTime(timeSpent)}
+                            You scored {displayScore}% in {questions.length} questions · {formatTime(timeSpent)}
                         </p>
                     </motion.div>
                 </motion.div>

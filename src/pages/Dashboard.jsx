@@ -130,7 +130,7 @@ export default function Dashboard() {
                             <StatCard label="Total Quizzes" value={47} icon={Award} color="#6C63FF" />
                             <StatCard label="Avg Score" value={78} icon={TrendingUp} color="#22C55E" suffix="%" />
                             <StatCard label="Day Streak" value={12} icon={Flame} color="#F59E0B" />
-                            <StatCard label="Study Hours" value={36} icon={Clock} color="#06B6D4" />
+                            <StatCard label="Total XP" value={2450} icon={Zap} color="#06B6D4" suffix=" XP" />
                         </motion.div>
 
                         {/* Main Grid */}
@@ -176,6 +176,9 @@ export default function Dashboard() {
                                                     fill="url(#scoreGradient)"
                                                     dot={{ r: 4, fill: '#6C63FF', strokeWidth: 2, stroke: '#fff' }}
                                                     activeDot={{ r: 6, fill: '#6C63FF' }}
+                                                    isAnimationActive={true}
+                                                    animationDuration={1500}
+                                                    animationEasing="ease-out"
                                                 />
                                             </AreaChart>
                                         </ResponsiveContainer>
