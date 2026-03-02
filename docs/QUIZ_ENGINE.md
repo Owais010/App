@@ -1,8 +1,8 @@
 # Quiz Engine & ML Logic - Technical Documentation
 
-> **Version**: 1.0.0  
-> **Owner**: Person 2 - Quiz Engine Team  
-> **Last Updated**: Day 1 Delivery
+> **Version**: 2.0.0  
+> **Location**: `backend/src/services/quizEngine/`  
+> **Last Updated**: June 2025
 
 ---
 
@@ -46,13 +46,13 @@ The Quiz Engine is a dynamic, adaptive assessment system that:
 ### 1. Install Dependencies
 
 ```bash
-npm install @supabase/supabase-js express uuid
-npm install --save-dev jest @jest/globals
+cd backend
+npm install
 ```
 
 ### 2. Configure Environment
 
-Create `.env` file:
+Create a `.env` file in the **project root** (backend reads from `../.env`):
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
@@ -62,19 +62,20 @@ NODE_ENV=development
 
 ### 3. Run Database Migrations
 
-Execute in order via Supabase SQL Editor or CLI:
+Execute in order via **Supabase Dashboard → SQL Editor**:
 
-```bash
-psql $DATABASE_URL -f sql/migrations/001_tables.sql
-psql $DATABASE_URL -f sql/migrations/002_rpc_functions.sql
-psql $DATABASE_URL -f sql/migrations/003_indexes.sql
-psql $DATABASE_URL -f sql/migrations/004_seed_data.sql
+```
+sql/migrations/001_tables.sql
+sql/migrations/002_rpc_functions.sql
+sql/migrations/003_indexes.sql
+sql/migrations/004_seed_data.sql
 ```
 
 ### 4. Start the Server
 
 ```bash
-node src/api/server.js
+cd backend
+npm run dev
 # Server running on http://localhost:3000
 ```
 
@@ -381,14 +382,26 @@ Gets level classifications for multiple topics.
 ### Service Layer Structure
 
 ```
-src/services/quizEngine/
-├── index.js              # Main entry point
-├── constants.js          # Configuration & utilities
-├── supabaseAdmin.js      # Server-side Supabase client
-├── generateQuiz.js       # Quiz generation engine
-├── finishAssessment.js   # Assessment completion
-├── recommendationEngine.js # Playlist recommendations
-└── levelClassifier.js    # Proficiency classification
+backend/
+├── src/
+│   ├── api/
+│   │   ├── server.js              # Express entry point (port 3000)
+│   │   └── assessmentRoutes.js    # All quiz API routes
+│   ├── lib/
+│   │   └── mlService.js           # ML service client (calls ml-service:8000)
+│   └── services/quizEngine/
+│       ├── index.js               # Main entry point (exports all functions)
+│       ├── constants.js           # Configuration & utilities
+│       ├── supabaseAdmin.js       # Server-side Supabase client
+│       ├── generateQuiz.js        # Quiz generation engine
+│       ├── finishAssessment.js    # Assessment completion
+│       ├── recommendationEngine.js # Playlist recommendations
+│       └── levelClassifier.js     # Proficiency classification
+├── tests/quizEngine/
+│   ├── quizEngine.test.js         # 38 unit tests
+│   └── integration.test.js        # Integration tests (needs live DB)
+├── jest.config.js
+└── package.json
 ```
 
 ### Level Classification Algorithm
@@ -439,24 +452,34 @@ maxWeightedScore = sum(weight[difficulty]);
 ### Run Unit Tests
 
 ```bash
+cd backend
 npm test
+```
+
+Or from the project root:
+```bash
+npm run test:backend
 ```
 
 ### Run Integration Tests
 
 ```bash
+cd backend
 RUN_INTEGRATION_TESTS=true npm test
 ```
 
 ### Test Coverage
 
 ```bash
+cd backend
 npm test -- --coverage
 ```
 
 ### Sample Test Commands
 
 ```bash
+cd backend
+
 # Run specific test file
 npm test -- --testPathPattern=quizEngine.test.js
 
@@ -466,6 +489,8 @@ npm test -- --verbose
 # Watch mode during development
 npm test -- --watch
 ```
+
+> **Note**: Tests use `--experimental-vm-modules` for ESM support. Always use `npm test`, not `npx jest` directly.
 
 ---
 
@@ -536,7 +561,8 @@ curl http://localhost:3000/api/health
 Enable verbose logging:
 
 ```bash
-DEBUG=quizEngine:* node src/api/server.js
+cd backend
+DEBUG=quizEngine:* npm run dev
 ```
 
 ---
@@ -567,10 +593,10 @@ The quiz engine integrates with a Python ML service for adaptive difficulty and 
 
 ### How it works
 
-1. **Quiz generation** (`generateQuiz.js`) calls the ML service to predict optimal difficulty per topic
+1. **Quiz generation** (`backend/src/services/quizEngine/generateQuiz.js`) calls the ML service to predict optimal difficulty per topic
 2. The ML prediction is **blended 60/40** with the static blueprint distribution
 3. If the ML service is offline, the quiz engine uses static distributions unchanged
-4. **After quiz completion** (`finishAssessment.js`) invalidates the ML feature cache so the next quiz uses updated data
+4. **After quiz completion** (`backend/src/services/quizEngine/finishAssessment.js`) invalidates the ML feature cache so the next quiz uses updated data
 
 ### Quick start with ML
 
@@ -581,16 +607,21 @@ cd ml-service
 python -m training.train_all   # Train models (first time only)
 uvicorn app.main:app --reload --port 8000
 
-# Terminal 2: Start React app (already configured)
-cd ..
+# Terminal 2: Start backend
+cd backend
+npm run dev
+
+# Terminal 3: Start frontend
+cd frontend
 npm run dev
 ```
 
-The React app connects to the ML service via `src/lib/mlService.js`. Configure in `.env`:
+The backend connects to the ML service via `backend/src/lib/mlService.js`. The frontend has its own simplified ML client at `frontend/src/lib/mlService.js`.
+
+Configure ML connection in `ml-service/.env`:
 
 ```dotenv
-VITE_ML_API_URL=http://localhost:8000
-VITE_ML_API_KEY=your_api_key
+API_KEY=your_api_key
 ```
 
 ### ML endpoints used by quiz engine
@@ -604,7 +635,3 @@ VITE_ML_API_KEY=your_api_key
 ### API documentation
 
 Full API documentation with request/response examples: [ml-service/API_DOCUMENTATION.md](../ml-service/API_DOCUMENTATION.md)
-
----
-
-**Contact**: Person 2 - Quiz Engine Team

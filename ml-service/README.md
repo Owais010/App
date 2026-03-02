@@ -6,15 +6,22 @@ Real-time ML inference service for the adaptive quiz engine. Predicts user skill
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  React App  │────▶│  ML Service  │────▶│   Supabase   │
-│ (mlService) │◀────│  (FastAPI)   │◀────│  (Postgres)  │
-└─────────────┘     └──────────────┘     └──────────────┘
-                         │
-                    ┌────┴────┐
-                    │ Models  │
-                    │ XGBoost │
-                    │LightGBM │
-                    └─────────┘
+│  Frontend   │     │   Backend    │     │              │
+│  React+Vite │     │  Express API │     │   Supabase   │
+│  (UI only)  │     │ + Quiz Engine│────▶│  (Postgres)  │
+└──────┬──────┘     └──────┬───────┘     └──────────────┘
+       │                   │                     ▲
+       └───────┬───────────┘                     │
+               ▼                                 │
+        ┌──────────────┐                         │
+        │  ML Service   │─────────────────────────┘
+        │  (FastAPI)    │
+        └──────┬───────┘
+          ┌────┴────┐
+          │ Models  │
+          │ XGBoost │
+          │LightGBM │
+          └─────────┘
 ```
 
 ## Models
@@ -235,17 +242,21 @@ curl http://localhost:8000/metrics \
 
 ---
 
-## Using from JavaScript (React App)
+## Using from JavaScript
 
-The ML service client lives at `src/lib/mlService.js`. It handles timeouts, auth, and graceful fallback automatically.
+Both the backend and frontend include an ML service client:
+
+- **Backend** (full client): `backend/src/lib/mlService.js` — used by the quiz engine for difficulty predictions
+- **Frontend** (simplified client): `frontend/src/lib/mlService.js` — used by UI components for health checks and level display
+
+The backend client handles timeouts, auth, and graceful fallback automatically.
 
 ### Setup
 
-Add these to your `.env` (Vite):
+Add to `ml-service/.env`:
 
 ```dotenv
-VITE_ML_API_URL=http://localhost:8000
-VITE_ML_API_KEY=your_secret_api_key
+API_KEY=your_secret_api_key
 ```
 
 ### Usage in components
@@ -278,12 +289,12 @@ const batch = await predictBatch(userId, [topicId1, topicId2, topicId3]);
 
 ### How the quiz engine uses ML
 
-The quiz generator (`src/services/quizEngine/generateQuiz.js`) automatically integrates ML predictions:
+The quiz generator (`backend/src/services/quizEngine/generateQuiz.js`) automatically integrates ML predictions:
 
 1. **Quiz generation** — Calls `predictNextQuestion()` / `predictBatch()` to get optimal difficulty
 2. **Difficulty blending** — ML recommendations are blended 60/40 with static blueprint distributions
 3. **Graceful fallback** — If ML service is offline, uses static difficulty profiles unchanged
-4. **Cache invalidation** — After quiz completion, `finishAssessment.js` invalidates the ML feature cache
+4. **Cache invalidation** — After quiz completion, `backend/src/services/quizEngine/finishAssessment.js` invalidates the ML feature cache
 
 ---
 
