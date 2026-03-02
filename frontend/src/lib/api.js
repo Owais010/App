@@ -82,3 +82,20 @@ export const finishAssessment = async (token, payload) => {
         return { success: false, error: error.message };
     }
 };
+
+/**
+ * Fetch user achievements
+ */
+export const fetchAchievements = async (token) => {
+    try {
+        const res = await fetch(`${API_BASE_URL}/achievements`, {
+            method: 'GET',
+            headers: getHeaders(token),
+        });
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return await res.json();
+    } catch (error) {
+        console.error("fetchAchievements Error:", error);
+        return { success: false, error: error.message };
+    }
+};

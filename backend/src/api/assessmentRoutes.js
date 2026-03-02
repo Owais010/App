@@ -23,7 +23,8 @@ import {
   RESPONSE_CODES,
   ERROR_MESSAGES,
 } from "../services/quizEngine/index.js";
-import { getDashboardSummary } from "../services/dashboardService.js";
+import { getDashboardSummary, getUserProfile as getProfileRow } from "../services/dashboardService.js";
+import { getUserAchievements } from "../services/achievementService.js";
 import supabaseAdmin from "../services/quizEngine/supabaseAdmin.js";
 
 const router = express.Router();
@@ -425,6 +426,33 @@ router.post("/recommendations/:id/status", requireAuth, async (req, res) => {
 });
 
 // ============================================================================
+// ACHIEVEMENTS ENDPOINT
+// ============================================================================
+
+/**
+ * GET /achievements
+ *
+ * Get user's achievements with unlock status and progress
+ */
+router.get("/achievements", requireAuth, async (req, res) => {
+  try {
+    const result = await getUserAchievements(req.userId);
+
+    if (!result.success) {
+      return res.status(RESPONSE_CODES.INTERNAL_ERROR).json(result);
+    }
+
+    return res.status(RESPONSE_CODES.SUCCESS).json(result);
+  } catch (error) {
+    console.error("Achievements error:", error);
+    return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================================
 // USER STATS ENDPOINTS
 // ============================================================================
 
@@ -460,25 +488,29 @@ router.get("/user/profile", requireAuth, async (req, res) => {
 /**
  * GET /profile
  *
- * Alias for /user/profile to match exact architecture spec
+ * Returns user's profiles-table info (full_name etc.) merged with performance stats.
+ * This is the endpoint AuthContext calls to get the display name.
  */
 router.get("/profile", requireAuth, async (req, res) => {
   try {
-    const profile = await getUserProfile(req.userId);
+    // Fetch the profiles table row (has full_name)
+    const profileRowRes = await getProfileRow(req.userId);
+    const profileRow = profileRowRes?.profile || {};
 
-    if (!profile) {
-      return res.status(RESPONSE_CODES.NOT_FOUND).json({
-        success: false,
-        error: "No profile data found",
-      });
-    }
+    // Also fetch performance profile from quiz engine
+    const perfProfile = await getUserProfile(req.userId);
 
     return res.status(RESPONSE_CODES.SUCCESS).json({
       success: true,
-      profile,
+      profile: {
+        full_name: profileRow.full_name || null,
+        avatar_url: profileRow.avatar_url || null,
+        target_role: profileRow.target_role || null,
+        ...perfProfile,
+      },
     });
   } catch (error) {
-    console.error("Get user profile error:", error);
+    console.error("Get profile error:", error);
     return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
       success: false,
       error: error.message,

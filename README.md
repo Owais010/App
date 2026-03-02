@@ -263,6 +263,8 @@ Requires Docker Desktop running. Models are trained at build time.
 
 | Document | Description |
 | -------- | ----------- |
+| [docs/DEV_QUICKSTART.md](docs/DEV_QUICKSTART.md) | Dev quickstart — run everything locally in ~10 min |
+| [docs/DEPLOY_VERCEL.md](docs/DEPLOY_VERCEL.md) | Deploy all 3 services to Vercel |
 | [docs/QUIZ_ENGINE.md](docs/QUIZ_ENGINE.md) | Quiz engine technical docs, DB schema, API reference |
 | [ml-service/README.md](ml-service/README.md) | ML service setup, API usage, model training |
 | [ml-service/API_DOCUMENTATION.md](ml-service/API_DOCUMENTATION.md) | Full ML API reference with request/response examples |

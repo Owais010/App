@@ -68,6 +68,10 @@ export default function Dashboard() {
         || user?.email?.split('@')[0]
         || 'Learner'
 
+    // Re-fetch dashboard data every time component mounts (e.g. after completing a quiz)
+    const [fetchKey, setFetchKey] = useState(0)
+    useEffect(() => { setFetchKey(k => k + 1) }, [])
+
     useEffect(() => {
         const loadDashboard = async () => {
             if (!user?.sessionToken) return;
@@ -79,7 +83,7 @@ export default function Dashboard() {
             setLoading(false);
         };
         loadDashboard();
-    }, [user?.sessionToken]);
+    }, [user?.sessionToken, fetchKey]);
 
     const avgScore = dashboardData ? Math.round(dashboardData.overallAccuracy * 100) : 0;
     const lastAssessmentScore = dashboardData?.lastAssessment?.total > 0

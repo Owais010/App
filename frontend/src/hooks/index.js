@@ -5,8 +5,14 @@ export function useCountUp(end, duration = 2000, startOnMount = true) {
     const [started, setStarted] = useState(startOnMount)
     const rafRef = useRef(null)
 
+    // Sync started state when the external trigger changes (e.g. isInView goes true)
+    useEffect(() => {
+        if (startOnMount) setStarted(true)
+    }, [startOnMount])
+
     useEffect(() => {
         if (!started) return
+        if (end === 0) { setCount(0); return }
         let startTime = null
 
         const animate = (timestamp) => {

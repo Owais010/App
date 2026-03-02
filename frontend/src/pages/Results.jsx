@@ -11,7 +11,7 @@ import { ProgressRing } from '../components/ProgressBar'
 import PageTransition from '../components/PageTransition'
 import { useAuth } from '../context/AuthContext'
 import { finishAssessment } from '../lib/api'
-import { getMLPrediction } from '../lib/mlService'
+import { predictLevel, predictDifficulty } from '../lib/mlService'
 
 function getBadge(scorePercent) {
     if (scorePercent >= 90) return { label: 'Outstanding', color: '#6C63FF', icon: Trophy }
@@ -68,26 +68,72 @@ export default function Results() {
     }, [user?.sessionToken, assessmentId, answers, timeSpentSeconds]);
 
     useEffect(() => {
-        // Fetch ML Data async without blocking the main results
+        // Fetch ML predictions after results are loaded
         const fetchMLData = async () => {
-            if (!telemetry || !user) return;
+            if (!user || !resultData) return;
             setMlLoading(true);
             try {
-                const payload = {
-                    user_id: user.id || 'anonymous_user',
-                    topic_id: subject,
-                    attempt_count: 5,
-                    correct_attempts: answers.length > 0 ? answers.length / 2 : 5, // mock
-                    avg_response_time: Math.max(0.1, telemetry.avg_response_time || 0),
-                    self_confidence_rating: telemetry.self_confidence_rating || 0.5,
-                    difficulty_feedback: telemetry.difficulty_feedback || 3,
-                    session_duration: Math.max(0.1, timeSpentSeconds / 60),
-                    previous_mastery_score: 0.5,
-                    time_since_last_attempt: 24
+                const userId = user.id || 'anonymous_user';
+                const topicId = subject;
+                const accuracy = resultData.total > 0 ? resultData.score / resultData.total : 0;
+                const avgTime = answers.length > 0 && timeSpentSeconds > 0
+                    ? timeSpentSeconds / answers.length : 10;
+
+                // Build a feature vector from the actual quiz results
+                const features = {
+                    total_attempts: answers.length,
+                    correct_attempts: resultData.score,
+                    accuracy: accuracy,
+                    weighted_score: accuracy * 100,
+                    recent_accuracy: accuracy,
+                    accuracy_trend: 0.0,
+                    streak_length: 0,
+                    avg_time_per_q: avgTime,
+                    days_since_last: 0,
+                    easy_accuracy: accuracy,
+                    medium_accuracy: accuracy,
+                    hard_accuracy: accuracy,
+                    global_accuracy: accuracy,
+                    topics_attempted: 1
                 };
 
-                const data = await getMLPrediction(payload);
-                setMlData(data);
+                // Call both endpoints in parallel
+                const [levelRes, diffRes] = await Promise.all([
+                    predictLevel(userId, topicId, features),
+                    predictDifficulty(userId, topicId, features)
+                ]);
+
+                // Derive recommended action from level + actual accuracy
+                const level = levelRes?.predicted_level;
+                const conf = levelRes?.confidence || 0;
+                let action = 'Continue Practicing';
+                if (accuracy >= 0.9) action = 'Try Harder Topics';
+                else if (accuracy >= 0.7) action = 'Level Up';
+                else if (level === 'beginner' && conf > 0.5) action = 'Focus on Basics';
+                else if (accuracy < 0.5) action = 'Focus on Basics';
+                else action = 'Keep Practicing';
+
+                // Compute skill gap from accuracy vs. advanced threshold
+                const advProb = levelRes?.probabilities?.advanced || 0;
+                const skillGap = Math.max(0, 1 - advProb - accuracy);
+                const isWeak = accuracy < 0.5;
+
+                // Topic ranking based on difficulty confidence and success prob
+                const rankScore = diffRes
+                    ? (diffRes.predicted_success_prob || 0) * 0.6 + (diffRes.confidence || 0) * 0.4
+                    : 0;
+
+                setMlData({
+                    action,
+                    predicted_level: levelRes?.predicted_level || 'unknown',
+                    level_confidence: levelRes?.confidence || 0,
+                    skill_gap: skillGap,
+                    is_weak: isWeak,
+                    difficulty_level: diffRes?.recommended_difficulty || 'medium',
+                    success_prob: diffRes?.predicted_success_prob || 0,
+                    rank_score: rankScore,
+                    model_used: levelRes?.model_used || diffRes?.model_used || 'rules'
+                });
             } catch (err) {
                 setMlError(err.message);
             } finally {
@@ -96,7 +142,7 @@ export default function Results() {
         };
 
         fetchMLData();
-    }, [telemetry, user, subject, answers, timeSpentSeconds]);
+    }, [user, resultData, subject, answers, timeSpentSeconds]);
 
     const scorePercent = resultData && resultData.total > 0
         ? Math.round((resultData.score / resultData.total) * 100)
@@ -279,25 +325,25 @@ export default function Results() {
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Recommended Action</p>
                                     <p className="font-heading font-semibold text-primary capitalize">
-                                        {mlData.adaptation?.action?.replace(/_/g, ' ') || 'Continue'}
+                                        {mlData.action}
                                     </p>
                                 </div>
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Estimated Skill Gap</p>
-                                    <p className={`font-heading font-semibold ${mlData.skill_gap?.weak ? 'text-red-500' : 'text-green-500'}`}>
-                                        {((mlData.skill_gap?.gap_score || 0) * 100).toFixed(1)}%
+                                    <p className={`font-heading font-semibold ${mlData.is_weak ? 'text-red-500' : 'text-green-500'}`}>
+                                        {(mlData.skill_gap * 100).toFixed(1)}%
                                     </p>
                                 </div>
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Difficulty Fit</p>
                                     <p className="font-heading font-semibold text-surface-700 dark:text-surface-300 capitalize">
-                                        {mlData.difficulty?.difficulty_level || 'Optimal'}
+                                        {mlData.difficulty_level}
                                     </p>
                                 </div>
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Next Topic Rank</p>
                                     <p className="font-heading font-semibold text-purple-500">
-                                        {((mlData.ranking?.ranking_score || 0) * 10).toFixed(1)} / 10
+                                        {(mlData.rank_score * 10).toFixed(1)} / 10
                                     </p>
                                 </div>
                             </div>

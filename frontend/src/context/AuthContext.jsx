@@ -82,7 +82,9 @@ export function AuthProvider({ children }) {
     const signIn = async (email, password) => {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
-        setUser(data.user)
+        // Properly set user with sessionToken before returning,
+        // so Dashboard's effect can fetch data immediately on mount
+        await handleUserSession(data.user, data.session.access_token)
         return data
     }
 
