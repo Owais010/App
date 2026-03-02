@@ -12,6 +12,8 @@ import QuizSetup from './pages/QuizSetup'
 import Quiz from './pages/Quiz'
 import Results from './pages/Results'
 import Achievements from './pages/Achievements'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import { useEffect } from 'react'
 
 function ScrollToTop() {
@@ -31,6 +33,8 @@ function AnimatedRoutes() {
                 <Route path="/" element={<Landing />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/signup" element={<Signup />} />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
                 <Route
                     path="/dashboard"
                     element={

@@ -150,6 +150,14 @@ export default function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                             error={errors.password}
                         />
+                        <div className="flex justify-end">
+                            <Link
+                                to="/forgot-password"
+                                className="text-sm text-primary hover:underline font-medium"
+                            >
+                                Forgot password?
+                            </Link>
+                        </div>
                         <Button type="submit" className="w-full" loading={loading}>
                             Sign In
                         </Button>
