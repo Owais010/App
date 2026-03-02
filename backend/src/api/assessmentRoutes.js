@@ -23,6 +23,7 @@ import {
   RESPONSE_CODES,
   ERROR_MESSAGES,
 } from "../services/quizEngine/index.js";
+import { getDashboardSummary } from "../services/dashboardService.js";
 
 const router = express.Router();
 
@@ -387,6 +388,58 @@ router.get("/user/profile", requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Get user profile error:", error);
+    return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /profile
+ *
+ * Alias for /user/profile to match exact architecture spec
+ */
+router.get("/profile", requireAuth, async (req, res) => {
+  try {
+    const profile = await getUserProfile(req.userId);
+
+    if (!profile) {
+      return res.status(RESPONSE_CODES.NOT_FOUND).json({
+        success: false,
+        error: "No profile data found",
+      });
+    }
+
+    return res.status(RESPONSE_CODES.SUCCESS).json({
+      success: true,
+      profile,
+    });
+  } catch (error) {
+    console.error("Get user profile error:", error);
+    return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /dashboard-summary
+ *
+ * Aggregated endpoint for the dashboard
+ */
+router.get("/dashboard-summary", requireAuth, async (req, res) => {
+  try {
+    const result = await getDashboardSummary(req.userId);
+
+    if (!result.success) {
+      return res.status(RESPONSE_CODES.INTERNAL_ERROR).json(result);
+    }
+
+    return res.status(RESPONSE_CODES.SUCCESS).json(result);
+  } catch (error) {
+    console.error("Dashboard summary error:", error);
     return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
       success: false,
       error: error.message,

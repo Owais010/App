@@ -726,7 +726,7 @@ class QuizGenerator {
             assessmentQuestionId: s.id,
             questionId: s.question_id,
             order: s.question_order,
-            text: q.question_text || "",
+            questionText: q.question_text || "",
             options: [
               q.option_a || "",
               q.option_b || "",

@@ -1,24 +1,54 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Clock, ArrowRight, ChevronLeft, Star } from 'lucide-react'
+import { Clock, ArrowRight, ChevronLeft, Star, Loader2 } from 'lucide-react'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import ProgressBar from '../components/ProgressBar'
 import PageTransition from '../components/PageTransition'
-import { quizQuestions } from '../data'
+import { startAssessment } from '../lib/api'
+import { useAuth } from '../context/AuthContext'
 
 export default function Quiz() {
-    const [searchParams] = useSearchParams()
+    const { user } = useAuth()
     const navigate = useNavigate()
-    const subject = searchParams.get('subject') || 'mathematics'
+    const subject = searchParams.get('subject') || ''
     const count = Math.min(Number(searchParams.get('count')) || 5, 10)
+    const difficulty = searchParams.get('difficulty') || 'medium'
+    const type = 'diagnostic' // Can dynamically set based on params if needed
 
-    const questions = useMemo(() => {
-        // Find questions for the subject, fallback to 'data-structures' if it exists to prevent crashes
-        const qList = quizQuestions[subject] || quizQuestions['data-structures'] || []
-        return qList.slice(0, count)
-    }, [subject, count])
+    const [questions, setQuestions] = useState([])
+    const [assessmentId, setAssessmentId] = useState(null)
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+
+    useEffect(() => {
+        const initQuiz = async () => {
+            if (!user?.sessionToken) return;
+            try {
+                const payload = {
+                    type,
+                    numQuestions: count,
+                };
+                // If a valid UUID subject is passed, include it
+                if (subject && subject.length > 20) {
+                    payload.subjectId = subject;
+                }
+                const res = await startAssessment(user.sessionToken, payload);
+                if (res.success) {
+                    setQuestions(res.questions || []);
+                    setAssessmentId(res.assessmentId);
+                } else {
+                    setError(res.error || 'Failed to start assessment');
+                }
+            } catch (err) {
+                setError('Failed to fetch questions');
+            } finally {
+                setLoading(false);
+            }
+        };
+        initQuiz();
+    }, [user?.sessionToken, count, subject, type]);
 
     const [currentIndex, setCurrentIndex] = useState(0)
     const [selected, setSelected] = useState(null)
@@ -35,17 +65,20 @@ export default function Quiz() {
 
     // Timer
     useEffect(() => {
+        if (loading || error || questions.length === 0) return;
+
         if (timeLeft <= 0) {
             navigate(`/results?subject=${subject}`, {
-                state: { answers, questions, timeSpent: totalTime },
+                state: { answers, assessmentId, timeSpent: totalTime },
             })
             return
         }
         const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000)
         return () => clearInterval(timer)
-    }, [timeLeft, navigate, subject, answers, questions, totalTime])
+    }, [timeLeft, navigate, subject, answers, assessmentId, totalTime, loading, error, questions])
 
-    // Time spent is managed in navigation logic
+    // Convert numeric index (0,1,2,3) to letter (A,B,C,D) for backend format
+    const getOptionLetter = (index) => ['A', 'B', 'C', 'D'][index] || 'A';
 
     const handleKey = useCallback(
         (e) => {
@@ -68,12 +101,19 @@ export default function Quiz() {
 
     const handleNext = () => {
         if (selected === null) return
-        
+
         const timeTaken = (Date.now() - questionStartTime) / 1000
         const newResponseTimes = [...responseTimes, timeTaken]
         setResponseTimes(newResponseTimes)
-        
-        const newAnswers = [...answers, { questionId: questions[currentIndex].id, selected }]
+
+        const currentQ = questions[currentIndex];
+        const newAnswers = [...answers, {
+            questionId: currentQ.questionId,
+            assessmentQuestionId: currentQ.assessmentQuestionId,
+            selectedOption: getOptionLetter(selected),
+            timeTakenSeconds: timeTaken,
+            confidenceRating: confidence // will update later when submitting, but just placeholder for now
+        }]
         setAnswers(newAnswers)
 
         if (currentIndex >= questions.length - 1) {
@@ -87,18 +127,22 @@ export default function Quiz() {
     }
 
     const handleFinish = () => {
-        const avgResponseTime = responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
+        const avgResponseTime = responseTimes.reduce((a, b) => a + b, 0) / (responseTimes.length || 1)
 
-        navigate(`/results?subject=${subject}`, {
-            state: { 
-                answers, 
-                questions, 
-                timeSpent: totalTime - timeLeft,
+        // Update all answers with final confidence rating
+        const finalAnswers = answers.map(a => ({
+            ...a,
+            confidenceRating: confidence
+        }))
+
+        navigate(`/results`, {
+            state: {
+                answers: finalAnswers,
+                assessmentId,
+                timeSpentSeconds: totalTime - timeLeft,
                 telemetry: {
                     avg_response_time: avgResponseTime,
-                    self_confidence_rating: confidence,
-                    difficulty_feedback: difficultyRating,
-                    session_duration: (totalTime - timeLeft) / 60
+                    difficulty_feedback: difficultyRating
                 }
             },
         })
@@ -110,12 +154,29 @@ export default function Quiz() {
         return `${m}:${sec.toString().padStart(2, '0')}`
     }
 
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-surface-50 dark:bg-surface-950 flex flex-col items-center justify-center">
+                <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
+                <p className="text-surface-500 font-heading">Generating your assessment...</p>
+            </div>
+        )
+    }
+
+    if (error || questions.length === 0) {
+        return (
+            <div className="min-h-screen bg-surface-50 dark:bg-surface-950 flex flex-col items-center justify-center p-6 text-center">
+                <h3 className="text-xl font-heading font-bold mb-2">Oops! Something went wrong</h3>
+                <p className="text-surface-500 mb-6">{error || 'No questions currently available for this subject.'}</p>
+                <Button onClick={() => navigate('/quiz-setup')}>Go Back</Button>
+            </div>
+        )
+    }
+
     const q = questions[currentIndex] || {
-        id: -1,
-        question: 'No questions available for this subject yet.',
-        options: ['Return to Setup'],
-        topic: 'Error',
-        correct: 0
+        questionText: 'Error loading question.',
+        options: [],
+        difficulty: 'medium'
     }
     const timerWarning = timeLeft < 30
 
@@ -215,11 +276,10 @@ export default function Quiz() {
                                                 <button
                                                     key={star}
                                                     onClick={() => setDifficultyRating(star)}
-                                                    className={`p-2 rounded-full transition-colors ${
-                                                        difficultyRating >= star 
-                                                            ? 'text-yellow-400' 
+                                                    className={`p-2 rounded-full transition-colors ${difficultyRating >= star
+                                                            ? 'text-yellow-400'
                                                             : 'text-surface-300 dark:text-surface-600 hover:text-yellow-400/50'
-                                                    }`}
+                                                        }`}
                                                 >
                                                     <Star fill={difficultyRating >= star ? 'currentColor' : 'none'} size={32} />
                                                 </button>
@@ -238,17 +298,17 @@ export default function Quiz() {
                         ) : (
                             <>
                                 <div className="mb-2">
-                                    <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-md">
-                                        {q.topic}
+                                    <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-md capitalize">
+                                        Level: {q.difficulty || 'Medium'}
                                     </span>
                                 </div>
 
                                 <h2 className="text-xl md:text-2xl font-heading font-bold text-surface-900 dark:text-white mb-8 leading-relaxed">
-                                    {q.question}
+                                    {q.questionText}
                                 </h2>
 
                                 <div className="space-y-3">
-                                    {q.options.map((option, i) => (
+                                    {q.options?.map((option, i) => (
                                         <motion.button
                                             key={i}
                                             whileHover={{ scale: 1.01 }}

@@ -1,17 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-    Calculator, Atom, FlaskConical, Flame, TrendingUp,
-    Clock, ChevronRight, Award, Code, BookOpen, Sigma,
-    Zap, PenTool, Network, Cpu, Database, Terminal, Leaf,
-    BarChart3, Server, MonitorPlay, Coffee, GitGraph,
-    Globe, BrainCircuit, LayoutTemplate, Brain, Cloud,
-    LineChart, Shield, Wifi, Rocket
+    TrendingUp, Award, Flame, Zap, ChevronRight, PlayCircle, BookOpen, AlertCircle
 } from 'lucide-react'
-import {
-    AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-} from 'recharts'
 import { useAuth } from '../context/AuthContext'
 import Sidebar from '../components/Sidebar'
 import Card from '../components/Card'
@@ -19,14 +11,17 @@ import { ProgressRing } from '../components/ProgressBar'
 import ThemeToggle from '../components/ThemeToggle'
 import PageTransition from '../components/PageTransition'
 import { useCountUp, useInView } from '../hooks'
-import { subjects, weeklyProgress, recentActivity } from '../data'
+import { fetchDashboardSummary } from '../lib/api'
 
-const iconMap = {
-    Calculator, Atom, FlaskConical, Code, BookOpen, Sigma,
-    Zap, PenTool, Network, Cpu, Database, Terminal, Leaf,
-    BarChart3, Server, MonitorPlay, Coffee, GitGraph,
-    Globe, BrainCircuit, LayoutTemplate, Brain, Cloud,
-    LineChart, Shield, Wifi, Rocket
+// Simple default icon map for subjects
+const getIconForSubject = (name) => {
+    return BookOpen; // fallback
+}
+
+const getSubjectColor = (name) => {
+    const colors = ['#6C63FF', '#22C55E', '#F59E0B', '#06B6D4', '#EC4899'];
+    // just pick a color based on string length for consistency map
+    return colors[name.length % colors.length];
 }
 
 const container = {
@@ -61,27 +56,35 @@ function StatCard({ label, value, icon: Icon, color, suffix = '' }) {
     )
 }
 
-const CustomTooltip = ({ active, payload, label }) => {
-    if (!active || !payload?.length) return null
-    return (
-        <div className="bg-white dark:bg-surface-800 rounded-xl px-4 py-3 shadow-xl border border-surface-200 dark:border-white/[0.08]">
-            <p className="text-xs text-surface-400 mb-1">{label}</p>
-            <p className="text-sm font-heading font-semibold text-surface-900 dark:text-white">
-                Score: {payload[0].value}%
-            </p>
-        </div>
-    )
-}
-
 export default function Dashboard() {
     const { user } = useAuth()
     const navigate = useNavigate()
     const [collapsed, setCollapsed] = useState(false)
     const [mobileOpen, setMobileOpen] = useState(false)
+    const [loading, setLoading] = useState(true)
+    const [dashboardData, setDashboardData] = useState(null)
 
-    const firstName = user?.user_metadata?.full_name?.split(' ')[0]
+    const firstName = user?.fullName?.split(' ')[0]
         || user?.email?.split('@')[0]
         || 'Learner'
+
+    useEffect(() => {
+        const loadDashboard = async () => {
+            if (!user?.sessionToken) return;
+            setLoading(true);
+            const res = await fetchDashboardSummary(user.sessionToken);
+            if (res.success) {
+                setDashboardData(res.data);
+            }
+            setLoading(false);
+        };
+        loadDashboard();
+    }, [user?.sessionToken]);
+
+    const avgScore = dashboardData ? Math.round(dashboardData.overallAccuracy * 100) : 0;
+    const lastAssessmentScore = dashboardData?.lastAssessment?.total > 0
+        ? Math.round((dashboardData.lastAssessment.score / dashboardData.lastAssessment.total) * 100)
+        : 0;
 
     return (
         <div className="min-h-screen bg-surface-50 dark:bg-surface-950">
@@ -120,202 +123,165 @@ export default function Dashboard() {
                     </div>
 
                     <div className="px-6 lg:px-8 py-6 space-y-6">
-                        {/* Stats Row */}
-                        <motion.div
-                            variants={container}
-                            initial="hidden"
-                            animate="show"
-                            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
-                        >
-                            <StatCard label="Total Quizzes" value={47} icon={Award} color="#6C63FF" />
-                            <StatCard label="Avg Score" value={78} icon={TrendingUp} color="#22C55E" suffix="%" />
-                            <StatCard label="Day Streak" value={12} icon={Flame} color="#F59E0B" />
-                            <StatCard label="Total XP" value={2450} icon={Zap} color="#06B6D4" suffix=" XP" />
-                        </motion.div>
-
-                        {/* Main Grid */}
-                        <div className="grid lg:grid-cols-3 gap-6">
-                            {/* Progress Chart */}
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.3 }}
-                                className="lg:col-span-2"
-                            >
-                                <Card hover={false}>
-                                    <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4">
-                                        Weekly Performance
-                                    </h3>
-                                    <div className="h-64">
-                                        <ResponsiveContainer width="100%" height="100%">
-                                            <AreaChart data={weeklyProgress}>
-                                                <defs>
-                                                    <linearGradient id="scoreGradient" x1="0" y1="0" x2="0" y2="1">
-                                                        <stop offset="0%" stopColor="#6C63FF" stopOpacity={0.3} />
-                                                        <stop offset="100%" stopColor="#6C63FF" stopOpacity={0} />
-                                                    </linearGradient>
-                                                </defs>
-                                                <XAxis
-                                                    dataKey="day"
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    tick={{ fontSize: 12, fill: '#94A3B8' }}
-                                                />
-                                                <YAxis
-                                                    axisLine={false}
-                                                    tickLine={false}
-                                                    tick={{ fontSize: 12, fill: '#94A3B8' }}
-                                                    domain={[0, 100]}
-                                                />
-                                                <Tooltip content={<CustomTooltip />} />
-                                                <Area
-                                                    type="monotone"
-                                                    dataKey="score"
-                                                    stroke="#6C63FF"
-                                                    strokeWidth={2.5}
-                                                    fill="url(#scoreGradient)"
-                                                    dot={{ r: 4, fill: '#6C63FF', strokeWidth: 2, stroke: '#fff' }}
-                                                    activeDot={{ r: 6, fill: '#6C63FF' }}
-                                                    isAnimationActive={true}
-                                                    animationDuration={1500}
-                                                    animationEasing="ease-out"
-                                                />
-                                            </AreaChart>
-                                        </ResponsiveContainer>
-                                    </div>
-                                </Card>
-                            </motion.div>
-
-                            {/* Streak / Quick Actions */}
-                            <motion.div
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.4 }}
-                                className="space-y-4"
-                            >
-                                <Card className="text-center" glass>
-                                    <div className="inline-flex items-center gap-2 mb-3">
-                                        <Flame size={20} className="text-amber-400" />
-                                        <span className="font-heading font-semibold text-surface-900 dark:text-white">
-                                            12 Day Streak
-                                        </span>
-                                    </div>
-                                    <p className="text-sm text-surface-500 dark:text-surface-400 mb-4">
-                                        Keep going! You&apos;re on fire!
-                                    </p>
-                                    <div className="flex justify-center gap-1">
-                                        {[...Array(7)].map((_, i) => (
-                                            <div
-                                                key={i}
-                                                className={`w-7 h-7 rounded-md flex items-center justify-center text-xs font-heading font-medium ${i < 5
-                                                    ? 'bg-accent/20 text-accent'
-                                                    : 'bg-surface-100 dark:bg-white/[0.04] text-surface-400'
-                                                    }`}
-                                            >
-                                                {['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </Card>
-
-                                <Card
-                                    onClick={() => navigate('/quiz-setup')}
-                                    className="bg-hero-gradient !border-0 cursor-pointer"
+                        {loading ? (
+                            <div className="flex bg-surface-100 dark:bg-surface-800 animate-pulse rounded-xl h-40"></div>
+                        ) : (
+                            <>
+                                {/* Stats Row */}
+                                <motion.div
+                                    variants={container}
+                                    initial="hidden"
+                                    animate="show"
+                                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
                                 >
-                                    <h4 className="font-heading font-semibold text-white mb-1">Start a Quiz</h4>
-                                    <p className="text-sm text-white/70 mb-3">
-                                        Test your knowledge now
-                                    </p>
-                                    <div className="flex items-center text-white/90 text-sm font-medium">
-                                        Begin <ChevronRight size={16} className="ml-1" />
-                                    </div>
-                                </Card>
-                            </motion.div>
-                        </div>
+                                    <StatCard label="Avg Score" value={avgScore} icon={TrendingUp} color="#22C55E" suffix="%" />
+                                    <StatCard label="Last Assessment" value={lastAssessmentScore} icon={Award} color="#6C63FF" suffix="%" />
+                                    <StatCard label="Weak Topics" value={dashboardData?.weakTopics?.length || 0} icon={AlertCircle} color="#F59E0B" />
+                                </motion.div>
 
-                        {/* Subjects */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.5 }}
-                        >
-                            <div className="flex items-center justify-between mb-4">
-                                <h3 className="font-heading font-semibold text-surface-900 dark:text-white">
-                                    Your Subjects
-                                </h3>
-                                <button
-                                    onClick={() => navigate('/quiz-setup')}
-                                    className="text-sm text-accent hover:text-accent-light transition-colors font-medium"
-                                >
-                                    View All Curriculum
-                                </button>
-                            </div>
-                            <div className="grid sm:grid-cols-3 gap-4">
-                                {subjects.flatMap(s => s.courses).slice(0, 6).map((subject) => {
-                                    const Icon = iconMap[subject.icon] || Calculator
-                                    return (
-                                        <Card
-                                            key={subject.id}
-                                            onClick={() => navigate(`/quiz-setup?subject=${subject.id}`)}
-                                            className="flex items-center gap-4 cursor-pointer"
-                                        >
-                                            <div
-                                                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-                                                style={{ background: `${subject.color}15` }}
-                                            >
-                                                <Icon size={22} style={{ color: subject.color }} />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-heading font-semibold text-surface-900 dark:text-white text-sm truncate">
-                                                    {subject.name}
-                                                </p>
-                                                <p className="text-xs text-surface-400">{subject.progress}% complete</p>
-                                            </div>
-                                            <ProgressRing
-                                                value={subject.progress}
-                                                size={48}
-                                                strokeWidth={4}
-                                                color={subject.color}
-                                            />
+                                {/* Main Layout Grid */}
+                                <div className="grid lg:grid-cols-3 gap-6">
+
+                                    {/* Subject Performance & Weak Topics column */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.3 }}
+                                        className="lg:col-span-2 space-y-6"
+                                    >
+                                        <Card hover={false}>
+                                            <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4">
+                                                Subject Performance
+                                            </h3>
+
+                                            {dashboardData?.subjectStats?.length > 0 ? (
+                                                <div className="grid sm:grid-cols-2 gap-4">
+                                                    {dashboardData.subjectStats.map((subject, idx) => {
+                                                        const Icon = getIconForSubject(subject.subject)
+                                                        const color = getSubjectColor(subject.subject)
+                                                        const progress = Math.round(subject.accuracy * 100);
+                                                        return (
+                                                            <div
+                                                                key={idx}
+                                                                className="flex items-center gap-4 bg-surface-50 dark:bg-white/[0.02] p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]"
+                                                            >
+                                                                <div
+                                                                    className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                                                                    style={{ background: `${color}15` }}
+                                                                >
+                                                                    <Icon size={22} style={{ color: color }} />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="font-heading font-semibold text-surface-900 dark:text-white text-sm truncate">
+                                                                        {subject.subject}
+                                                                    </p>
+                                                                    <p className="text-xs text-surface-400">{progress}% accuracy</p>
+                                                                </div>
+                                                                <ProgressRing
+                                                                    value={progress}
+                                                                    size={48}
+                                                                    strokeWidth={4}
+                                                                    color={color}
+                                                                />
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-surface-500">Take an assessment to see your subject performance here.</p>
+                                            )}
                                         </Card>
-                                    )
-                                })}
-                            </div>
-                        </motion.div>
 
-                        {/* Recent Activity */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.6 }}
-                        >
-                            <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4">
-                                Recent Activity
-                            </h3>
-                            <Card hover={false} padding="p-0">
-                                <div className="divide-y divide-surface-100 dark:divide-white/[0.04]">
-                                    {recentActivity.map((act) => (
-                                        <div
-                                            key={act.id}
-                                            className="flex items-center justify-between px-6 py-4 hover:bg-surface-50 dark:hover:bg-white/[0.02] transition-colors cursor-pointer"
+                                        {/* Weak Topics */}
+                                        <Card hover={false}>
+                                            <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4">
+                                                Areas to Improve
+                                            </h3>
+                                            {dashboardData?.weakTopics?.length > 0 ? (
+                                                <div className="space-y-3">
+                                                    {dashboardData.weakTopics.map((topic, idx) => (
+                                                        <div key={idx} className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-100 dark:border-red-500/20">
+                                                            <div>
+                                                                <p className="font-semibold text-sm text-surface-900 dark:text-white">{topic.topic}</p>
+                                                                <p className="text-xs opacity-70">Level: <span className="capitalize">{topic.level}</span></p>
+                                                            </div>
+                                                            <div className="text-red-600 dark:text-red-400 font-bold text-sm">
+                                                                {Math.round(topic.accuracy * 100)}%
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-surface-500">You are doing great! Keep practicing to uncover more weak topics.</p>
+                                            )}
+                                        </Card>
+                                    </motion.div>
+
+                                    {/* Sidebar Column (Quick Actions & Recommendations) */}
+                                    <motion.div
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.4 }}
+                                        className="space-y-4"
+                                    >
+                                        <Card
+                                            onClick={() => navigate('/quiz-setup')}
+                                            className="bg-hero-gradient !border-0 cursor-pointer"
                                         >
-                                            <div>
-                                                <p className="font-medium text-sm text-surface-900 dark:text-white">
-                                                    {act.subject} — {act.topic}
-                                                </p>
-                                                <p className="text-xs text-surface-400 mt-0.5">
-                                                    {act.questions} questions · {act.date}
-                                                </p>
+                                            <h4 className="font-heading font-semibold text-white mb-1">Start Assessment</h4>
+                                            <p className="text-sm text-white/70 mb-3">
+                                                Test your knowledge now
+                                            </p>
+                                            <div className="flex items-center text-white/90 text-sm font-medium">
+                                                Begin <ChevronRight size={16} className="ml-1" />
                                             </div>
-                                            <div className={`text-sm font-heading font-bold ${act.score >= 80 ? 'text-accent' : act.score >= 60 ? 'text-amber-400' : 'text-red-400'
-                                                }`}>
-                                                {act.score}%
-                                            </div>
-                                        </div>
-                                    ))}
+                                        </Card>
+
+                                        {/* Recommended Playlists */}
+                                        <Card hover={false}>
+                                            <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4 flex items-center gap-2">
+                                                <PlayCircle size={18} className="text-accent" />
+                                                Recommended Playlists
+                                            </h3>
+
+                                            {dashboardData?.recommendations?.length > 0 ? (
+                                                <div className="space-y-3">
+                                                    {dashboardData.recommendations.map((rec, idx) => (
+                                                        <a
+                                                            key={idx}
+                                                            href={rec.youtubeUrl}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="block p-3 rounded-lg border border-surface-200 dark:border-white/10 hover:border-accent dark:hover:border-accent transition-colors bg-surface-50 dark:bg-surface-800"
+                                                        >
+                                                            <p className="text-xs text-accent font-semibold mb-1">{rec.subject}</p>
+                                                            <p className="text-sm text-surface-900 dark:text-white font-medium line-clamp-2">{rec.title}</p>
+                                                        </a>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm text-surface-500">Complete assessments to get tailored video recommendations.</p>
+                                            )}
+                                        </Card>
+
+                                        {/* Last Assessment */}
+                                        {dashboardData?.lastAssessment && dashboardData.lastAssessment.total > 0 && (
+                                            <Card className="text-center" glass>
+                                                <p className="text-sm text-surface-500 dark:text-surface-400 mb-2">
+                                                    Last Assessment Score
+                                                </p>
+                                                <div className="text-3xl font-heading font-bold text-accent mb-2">
+                                                    {dashboardData.lastAssessment.score} / {dashboardData.lastAssessment.total}
+                                                </div>
+                                                <p className="text-xs text-surface-400">
+                                                    {new Date(dashboardData.lastAssessment.completedAt).toLocaleDateString()}
+                                                </p>
+                                            </Card>
+                                        )}
+                                    </motion.div>
                                 </div>
-                            </Card>
-                        </motion.div>
+                            </>
+                        )}
                     </div>
                 </PageTransition>
             </motion.main>

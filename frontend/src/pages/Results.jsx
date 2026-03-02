@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
-    Trophy, Target, RotateCcw, ArrowRight, Star, Award, TrendingUp,
+    Trophy, Target, RotateCcw, ArrowRight, Star, TrendingUp, Loader2
 } from 'lucide-react'
 import {
     RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
@@ -15,12 +15,13 @@ import { ProgressRing } from '../components/ProgressBar'
 import PageTransition from '../components/PageTransition'
 import { performanceData } from '../data'
 import { useAuth } from '../context/AuthContext'
+import { finishAssessment } from '../lib/api'
 import { getMLPrediction } from '../lib/mlService'
 
-function getBadge(score) {
-    if (score >= 90) return { label: 'Outstanding', color: '#6C63FF', icon: Trophy }
-    if (score >= 70) return { label: 'Great Job', color: '#22C55E', icon: Star }
-    if (score >= 50) return { label: 'Keep Going', color: '#F59E0B', icon: TrendingUp }
+function getBadge(scorePercent) {
+    if (scorePercent >= 90) return { label: 'Outstanding', color: '#6C63FF', icon: Trophy }
+    if (scorePercent >= 70) return { label: 'Great Job', color: '#22C55E', icon: Star }
+    if (scorePercent >= 50) return { label: 'Keep Going', color: '#F59E0B', icon: TrendingUp }
     return { label: 'Needs Practice', color: '#EF4444', icon: Target }
 }
 
@@ -30,40 +31,62 @@ export default function Results() {
     const location = useLocation()
     const { user } = useAuth()
     const subject = searchParams.get('subject') || 'mathematics'
-    const { answers = [], questions = [], timeSpent = 0, telemetry } = location.state || {}
+    const { answers = [], assessmentId, timeSpentSeconds = 0, telemetry } = location.state || {}
+
+    const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+    const [resultData, setResultData] = useState(null)
+    const [displayScorePercent, setDisplayScorePercent] = useState(0)
 
     const [mlData, setMlData] = useState(null)
     const [mlLoading, setMlLoading] = useState(false)
     const [mlError, setMlError] = useState(null)
 
-    const score = useMemo(() => {
-        if (!questions.length) return 0
-        const correct = answers.filter(
-            (a, i) => questions[i] && a.selected === questions[i].correct
-        ).length
-        return Math.round((correct / questions.length) * 100)
-    }, [answers, questions])
+    useEffect(() => {
+        const submitAssessment = async () => {
+            if (!user?.sessionToken || !assessmentId) {
+                setError("Missing assessment data.");
+                setLoading(false);
+                return;
+            }
 
-    const badge = getBadge(score)
-    const BadgeIcon = badge.icon
+            try {
+                const payload = {
+                    assessmentId,
+                    answers,
+                    timeSpentSeconds
+                };
+                const res = await finishAssessment(user.sessionToken, payload);
+                if (res.success) {
+                    setResultData(res.data);
+                } else {
+                    setError(res.error || 'Failed to submit assessment');
+                }
+            } catch (err) {
+                setError('Failed to calculate results');
+            } finally {
+                setLoading(false);
+            }
+        };
 
-    const [displayScore, setDisplayScore] = useState(0)
+        submitAssessment();
+    }, [user?.sessionToken, assessmentId, answers, timeSpentSeconds]);
 
     useEffect(() => {
+        // Fetch ML Data async without blocking the main results
         const fetchMLData = async () => {
             if (!telemetry || !user) return;
             setMlLoading(true);
             try {
-                // Mocking historical data until backend fully supports tracking this
                 const payload = {
                     user_id: user.id || 'anonymous_user',
                     topic_id: subject,
                     attempt_count: 5,
-                    correct_attempts: answers.filter((a, i) => questions[i] && a.selected === questions[i].correct).length,
-                    avg_response_time: Math.max(0.1, telemetry.avg_response_time),
-                    self_confidence_rating: telemetry.self_confidence_rating,
-                    difficulty_feedback: telemetry.difficulty_feedback,
-                    session_duration: Math.max(0.1, telemetry.session_duration),
+                    correct_attempts: answers.length > 0 ? answers.length / 2 : 5, // mock
+                    avg_response_time: Math.max(0.1, telemetry.avg_response_time || 0),
+                    self_confidence_rating: telemetry.self_confidence_rating || 0.5,
+                    difficulty_feedback: telemetry.difficulty_feedback || 3,
+                    session_duration: Math.max(0.1, timeSpentSeconds / 60),
                     previous_mastery_score: 0.5,
                     time_since_last_attempt: 24
                 };
@@ -71,7 +94,6 @@ export default function Results() {
                 const data = await getMLPrediction(payload);
                 setMlData(data);
             } catch (err) {
-                console.error("Failed to fetch ML Prediction:", err);
                 setMlError(err.message);
             } finally {
                 setMlLoading(false);
@@ -79,9 +101,15 @@ export default function Results() {
         };
 
         fetchMLData();
-    }, [telemetry, user, subject, answers, questions]);
+    }, [telemetry, user, subject, answers, timeSpentSeconds]);
+
+    const scorePercent = resultData && resultData.total > 0
+        ? Math.round((resultData.score / resultData.total) * 100)
+        : 0;
 
     useEffect(() => {
+        if (!resultData) return;
+
         // Animate score from 0 to actual score
         const duration = 1500;
         const start = Date.now();
@@ -92,7 +120,7 @@ export default function Results() {
             const progress = Math.min((now - start) / duration, 1);
             // Ease out cubic
             const easeProgress = 1 - Math.pow(1 - progress, 3);
-            setDisplayScore(Math.round(score * easeProgress));
+            setDisplayScorePercent(Math.round(scorePercent * easeProgress));
 
             if (progress < 1) {
                 requestAnimationFrame(animateScore);
@@ -100,7 +128,7 @@ export default function Results() {
         };
         requestAnimationFrame(animateScore);
 
-        if (score >= 80) {
+        if (scorePercent >= 80) {
             const endConfetti = Date.now() + 2000
             const frame = () => {
                 confetti({
@@ -121,7 +149,7 @@ export default function Results() {
             }
             frame()
         }
-    }, [score])
+    }, [scorePercent, resultData])
 
     const formatTime = (s) => {
         const m = Math.floor(s / 60)
@@ -129,23 +157,45 @@ export default function Results() {
         return `${m}m ${sec}s`
     }
 
-    const recommendations = [
-        {
-            title: 'Review Weak Areas',
-            desc: 'Focus on topics where you scored below 70%',
-            action: 'View Topics',
-        },
-        {
-            title: 'Try a Harder Level',
-            desc: score >= 80 ? 'You\'re ready for advanced questions' : 'Master current level first',
-            action: 'Challenge',
-        },
-        {
-            title: 'Practice Daily',
-            desc: 'Consistent practice improves retention by 40%',
-            action: 'Set Reminder',
-        },
-    ]
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-surface-50 dark:bg-surface-950 flex flex-col items-center justify-center">
+                <Loader2 className="w-8 h-8 text-primary animate-spin mb-4" />
+                <p className="text-surface-500 font-heading">Analyzing your results...</p>
+            </div>
+        )
+    }
+
+    if (error || !resultData) {
+        return (
+            <div className="min-h-screen bg-surface-50 dark:bg-surface-950 flex flex-col items-center justify-center p-6 text-center">
+                <h3 className="text-xl font-heading font-bold mb-2">Oops! Something went wrong</h3>
+                <p className="text-surface-500 mb-6">{error || 'Could not load your results.'}</p>
+                <Button onClick={() => navigate('/dashboard')}>Go to Dashboard</Button>
+            </div>
+        )
+    }
+
+    const badge = getBadge(scorePercent)
+    const BadgeIcon = badge.icon
+
+    // Use backend recommendations if provided, else fallback to standard
+    const recommendations = resultData.recommendations?.length > 0
+        ? resultData.recommendations
+        : [
+            {
+                title: 'Review Weak Areas',
+                desc: 'Focus on topics where you struggled',
+                action: 'View Topics',
+                link: '#'
+            },
+            {
+                title: 'Practice Daily',
+                desc: 'Consistent practice improves retention by 40%',
+                action: 'Set Reminder',
+                link: '#'
+            },
+        ];
 
     return (
         <PageTransition className="min-h-screen bg-surface-50 dark:bg-surface-950 py-12 px-6">
@@ -163,7 +213,7 @@ export default function Results() {
                         transition={{ delay: 0.3, type: 'spring', stiffness: 200 }}
                         className="inline-block mb-6"
                     >
-                        <ProgressRing value={score} size={140} strokeWidth={8} color={badge.color} />
+                        <ProgressRing value={scorePercent} size={140} strokeWidth={8} color={badge.color} />
                     </motion.div>
 
                     <motion.div
@@ -182,10 +232,10 @@ export default function Results() {
                         </div>
 
                         <h1 className="text-3xl md:text-4xl font-heading font-bold text-surface-900 dark:text-white mb-2">
-                            {score >= 80 ? 'Excellent Work!' : score >= 50 ? 'Good Effort!' : 'Keep Practicing!'}
+                            {scorePercent >= 80 ? 'Excellent Work!' : scorePercent >= 50 ? 'Good Effort!' : 'Keep Practicing!'}
                         </h1>
                         <p className="text-surface-500 dark:text-surface-400">
-                            You scored {displayScore}% in {questions.length} questions · {formatTime(timeSpent)}
+                            You scored {displayScorePercent}% ({resultData.score} out of {resultData.total}) · {formatTime(timeSpentSeconds)}
                         </p>
                     </motion.div>
                 </motion.div>
@@ -198,13 +248,13 @@ export default function Results() {
                     className="grid grid-cols-3 gap-4 mb-8"
                 >
                     {[
-                        { label: 'Correct', value: answers.filter((a, i) => questions[i] && a.selected === questions[i].correct).length, total: questions.length, color: '#22C55E' },
-                        { label: 'Incorrect', value: answers.filter((a, i) => questions[i] && a.selected !== questions[i].correct).length, total: questions.length, color: '#EF4444' },
-                        { label: 'Time', value: formatTime(timeSpent), color: '#6C63FF' },
+                        { label: 'Correct', value: resultData.score, total: resultData.total, color: '#22C55E' },
+                        { label: 'Incorrect', value: resultData.total - resultData.score, total: resultData.total, color: '#EF4444' },
+                        { label: 'Time', value: formatTime(timeSpentSeconds), color: '#6C63FF' },
                     ].map((stat, i) => (
                         <Card key={i} className="text-center">
                             <p className="text-2xl font-heading font-bold" style={{ color: stat.color }}>
-                                {typeof stat.value === 'number' ? `${stat.value}/${stat.total}` : stat.value}
+                                {typeof stat.value === 'number' && stat.total ? `${stat.value}/${stat.total}` : stat.value}
                             </p>
                             <p className="text-xs text-surface-400 mt-1">{stat.label}</p>
                         </Card>
@@ -234,69 +284,31 @@ export default function Results() {
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Recommended Action</p>
                                     <p className="font-heading font-semibold text-primary capitalize">
-                                        {mlData.adaptation?.action?.replace(/_/g, ' ')}
+                                        {mlData.adaptation?.action?.replace(/_/g, ' ') || 'Continue'}
                                     </p>
                                 </div>
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Estimated Skill Gap</p>
                                     <p className={`font-heading font-semibold ${mlData.skill_gap?.weak ? 'text-red-500' : 'text-green-500'}`}>
-                                        {(mlData.skill_gap?.gap_score * 100).toFixed(1)}%
+                                        {((mlData.skill_gap?.gap_score || 0) * 100).toFixed(1)}%
                                     </p>
                                 </div>
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Difficulty Fit</p>
                                     <p className="font-heading font-semibold text-surface-700 dark:text-surface-300 capitalize">
-                                        {mlData.difficulty?.difficulty_level}
+                                        {mlData.difficulty?.difficulty_level || 'Optimal'}
                                     </p>
                                 </div>
                                 <div className="bg-surface-50 dark:bg-surface-800 p-4 rounded-xl border border-surface-200 dark:border-white/[0.04]">
                                     <p className="text-xs text-surface-400 mb-1">Next Topic Rank</p>
                                     <p className="font-heading font-semibold text-purple-500">
-                                        {(mlData.ranking?.ranking_score * 10).toFixed(1)} / 10
+                                        {((mlData.ranking?.ranking_score || 0) * 10).toFixed(1)} / 10
                                     </p>
                                 </div>
                             </div>
                         ) : (
                             <p className="text-xs text-surface-400 ml-2">No AI insights generated. Please complete a quiz with telemetry data to see predictions.</p>
                         )}
-                    </Card>
-                </motion.div>
-
-                {/* Radar Chart */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.7 }}
-                    className="mb-8"
-                >
-                    <Card hover={false}>
-                        <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4">
-                            Performance Breakdown
-                        </h3>
-                        <div className="h-72">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <RadarChart data={performanceData} cx="50%" cy="50%" outerRadius="70%">
-                                    <PolarGrid stroke="#334155" strokeOpacity={0.3} />
-                                    <PolarAngleAxis
-                                        dataKey="subject"
-                                        tick={{ fontSize: 11, fill: '#94A3B8' }}
-                                    />
-                                    <PolarRadiusAxis
-                                        angle={30}
-                                        domain={[0, 100]}
-                                        tick={{ fontSize: 10, fill: '#64748B' }}
-                                    />
-                                    <Radar
-                                        name="Score"
-                                        dataKey="score"
-                                        stroke="#6C63FF"
-                                        fill="#6C63FF"
-                                        fillOpacity={0.2}
-                                        strokeWidth={2}
-                                    />
-                                </RadarChart>
-                            </ResponsiveContainer>
-                        </div>
                     </Card>
                 </motion.div>
 
@@ -308,16 +320,18 @@ export default function Results() {
                     className="mb-8"
                 >
                     <h3 className="font-heading font-semibold text-surface-900 dark:text-white mb-4">
-                        Recommendations
+                        Recommendations based on weak topics
                     </h3>
                     <div className="grid sm:grid-cols-3 gap-4">
                         {recommendations.map((rec, i) => (
-                            <Card key={i} className="cursor-pointer">
+                            <Card key={i} className="cursor-pointer" onClick={() => rec.youtubeUrl && window.open(rec.youtubeUrl, '_blank')}>
                                 <h4 className="font-heading font-semibold text-sm text-surface-900 dark:text-white mb-1">
                                     {rec.title}
                                 </h4>
-                                <p className="text-xs text-surface-400 mb-3">{rec.desc}</p>
-                                <span className="text-xs font-medium text-primary">{rec.action} →</span>
+                                <p className="text-xs text-surface-400 mb-3">{rec.subject || rec.desc}</p>
+                                <span className="text-xs font-medium text-primary">
+                                    {rec.youtubeUrl ? 'Watch Tutorial →' : `${rec.action || 'View'} →`}
+                                </span>
                             </Card>
                         ))}
                     </div>

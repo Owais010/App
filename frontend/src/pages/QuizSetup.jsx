@@ -79,13 +79,13 @@ export default function QuizSetup() {
                                 Choose Subject
                             </h3>
                             <div className="space-y-6">
-                                {subjects.map((semester) => (
-                                    <div key={semester.semester}>
+                                {subjects.map((group) => (
+                                    <div key={group.category}>
                                         <h4 className="text-sm font-semibold text-surface-500 dark:text-surface-400 mb-3 ml-1 uppercase tracking-wider">
-                                            {semester.semester}
+                                            {group.category}
                                         </h4>
                                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                            {semester.courses.map((s) => (
+                                            {group.courses.map((s) => (
                                                 <motion.button
                                                     key={s.id}
                                                     whileHover={{ scale: 1.02 }}
