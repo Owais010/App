@@ -518,7 +518,7 @@ class AssessmentCompleter {
           ),
         ];
         for (const tid of affectedTopicIds) {
-          invalidateMLCache(userId, tid).catch(() => {});
+          invalidateMLCache(userId, tid).catch(() => { });
         }
       } catch (_) {
         // ML service unavailable — non-critical
@@ -604,45 +604,40 @@ class AssessmentCompleter {
         stat.accuracy = stat.attempts > 0 ? stat.correct / stat.attempts : 0;
       }
 
-      // 13. Build response
+      // 13. Build response matching exact required schema
       return {
         success: true,
         assessmentId,
         score: totalCorrect,
-        totalQuestions: processedAnswers.length,
+        total: processedAnswers.length,
+        overallAccuracy: totalAttempted > 0 ? parseFloat((totalCorrect / totalAttempted).toFixed(4)) : 0,
+
+        weakTopics: updatedTopics
+          .sort((a, b) => a.accuracy - b.accuracy)
+          .slice(0, 5)
+          .map((t) => {
+            const rec = recommendations.find(r => r.topic_id === t.topic_id);
+            return {
+              topic: rec?.topic_name || t.topic_id,
+              accuracy: parseFloat(t.accuracy) || 0,
+              level: t.level || 'beginner'
+            };
+          }),
+
+        recommendations: recommendations
+          .map((r) => ({
+            subject: r.subject_name || 'Unknown',
+            title: r.resource?.title || `${r.topic_name} Guide`,
+            youtubeUrl: r.resource?.youtube_url || null
+          }))
+          .filter(r => r.youtubeUrl), // only include actionable video recommendations
+
+        // Extra details for any legacy clients or deeper debugging
         answered: totalAttempted,
         skipped: processedAnswers.filter((a) => a.is_skipped).length,
-        accuracy: totalAttempted > 0 ? totalCorrect / totalAttempted : 0,
         weightedScore: totalWeightedScore,
         completedAt: completedAssessment.completed_at,
-
         perSubjectStats: Object.values(perSubjectStats),
-
-        perTopicStats: updatedTopics.map((t) => ({
-          topicId: t.topic_id,
-          accuracy: parseFloat(t.accuracy) || 0,
-          level: t.level,
-          attempts: t.attempts,
-          correct: t.correct,
-        })),
-
-        recommendations: recommendations.map((r) => ({
-          topicId: r.topic_id,
-          topicName: r.topic_name,
-          subjectId: r.subject_id,
-          subjectName: r.subject_name,
-          userAccuracy: r.accuracy,
-          level: r.level,
-          resource: r.resource
-            ? {
-                id: r.resource.id,
-                title: r.resource.title,
-                youtubeUrl: r.resource.youtube_url,
-                type: r.resource.level || "general",
-              }
-            : null,
-          reason: r.reason,
-        })),
       };
     } catch (error) {
       console.error("Assessment completion error:", error);

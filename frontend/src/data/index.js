@@ -219,74 +219,28 @@ export const quizQuestions = {
 
 export const subjects = [
     {
-        semester: 'Semester 1',
+        category: 'Core Technical',
         courses: [
-            { id: 'linear-algebra', name: 'Linear Algebra and Calculus', icon: 'Calculator', color: '#6C63FF', progress: 0 },
-            { id: 'applied-physics', name: 'Applied Physics', icon: 'Atom', color: '#22C55E', progress: 0 },
-            { id: 'programming-for-problem-solving', name: 'Programming for Problem Solving', icon: 'Code', color: '#3B82F6', progress: 0 },
-            { id: 'technical-english', name: 'Technical English', icon: 'BookOpen', color: '#F59E0B', progress: 0 },
+            { id: 'data-structures', name: 'Data Structures & Algorithms', icon: 'Binary', color: '#6C63FF', progress: 0 },
+            { id: 'oop', name: 'Object-Oriented Programming', icon: 'Code', color: '#22C55E', progress: 0 },
+            { id: 'dbms', name: 'Database Management Systems', icon: 'Database', color: '#F59E0B', progress: 0 },
         ]
     },
     {
-        semester: 'Semester 2',
+        category: 'Systems & Engineering',
         courses: [
-            { id: 'differential-equations', name: 'Differential Equations and Vector Calculus', icon: 'Sigma', color: '#6C63FF', progress: 0 },
-            { id: 'chemistry', name: 'Chemistry', icon: 'FlaskConical', color: '#F59E0B', progress: 0 },
-            { id: 'electrical-engineering', name: 'Basic Electrical Engineering', icon: 'Zap', color: '#EF4444', progress: 0 },
-            { id: 'engineering-graphics', name: 'Engineering Graphics and Design', icon: 'PenTool', color: '#10B981', progress: 0 },
+            { id: 'operating-systems', name: 'Operating Systems (OS)', icon: 'Terminal', color: '#3B82F6', progress: 0 },
+            { id: 'computer-networks', name: 'Computer Networks (CN)', icon: 'Network', color: '#8B5CF6', progress: 0 },
+            { id: 'system-design', name: 'System Design', icon: 'Server', color: '#EC4899', progress: 0 },
+            { id: 'software-engineering', name: 'Software Engineering', icon: 'GitGraph', color: '#14B8A6', progress: 0 },
         ]
     },
     {
-        semester: 'Semester 3',
+        category: 'Non-Technical / Aptitude',
         courses: [
-            { id: 'discrete-mathematics', name: 'Discrete Mathematical Structures', icon: 'Network', color: '#8B5CF6', progress: 0 },
-            { id: 'digital-logic', name: 'Digital Logic Design', icon: 'Cpu', color: '#06B6D4', progress: 0 },
-            { id: 'data-structures', name: 'Data Structures', icon: 'Database', color: '#3B82F6', progress: 0 },
-            { id: 'python-programming', name: 'Python Programming', icon: 'Terminal', color: '#EAB308', progress: 0 },
-            { id: 'environmental-science', name: 'Environmental Science', icon: 'Leaf', color: '#22C55E', progress: 0 },
-        ]
-    },
-    {
-        semester: 'Semester 4',
-        courses: [
-            { id: 'probability-statistics', name: 'Probability and Statistics', icon: 'BarChart3', color: '#F97316', progress: 0 },
-            { id: 'computer-organization', name: 'Computer Organization and Architecture', icon: 'Server', color: '#64748B', progress: 0 },
-            { id: 'operating-systems', name: 'Operating Systems', icon: 'MonitorPlay', color: '#3B82F6', progress: 0 },
-            { id: 'dbms', name: 'Database Management Systems', icon: 'Database', color: '#14B8A6', progress: 0 },
-            { id: 'oop-java', name: 'Object Oriented Programming', icon: 'Coffee', color: '#EF4444', progress: 0 },
-        ]
-    },
-    {
-        semester: 'Semester 5',
-        courses: [
-            { id: 'design-analysis-algorithms', name: 'Design and Analysis of Algorithms', icon: 'GitGraph', color: '#8B5CF6', progress: 0 },
-            { id: 'web-technologies', name: 'Web Technologies', icon: 'Globe', color: '#3B82F6', progress: 0 },
-            { id: 'computer-networks', name: 'Computer Networks', icon: 'Network', color: '#06B6D4', progress: 0 },
-            { id: 'artificial-intelligence', name: 'Artificial Intelligence', icon: 'BrainCircuit', color: '#EC4899', progress: 0 },
-            { id: 'software-engineering', name: 'Software Engineering', icon: 'LayoutTemplate', color: '#64748B', progress: 0 },
-        ]
-    },
-    {
-        semester: 'Semester 6',
-        courses: [
-            { id: 'machine-learning', name: 'Machine Learning', icon: 'Brain', color: '#EC4899', progress: 0 },
-            { id: 'compiler-design', name: 'Compiler Design', icon: 'Code', color: '#3B82F6', progress: 0 },
-            { id: 'cloud-computing', name: 'Cloud Computing', icon: 'Cloud', color: '#0EA5E9', progress: 0 },
-            { id: 'data-analytics', name: 'Data Analytics', icon: 'LineChart', color: '#10B981', progress: 0 },
-        ]
-    },
-    {
-        semester: 'Semester 7',
-        courses: [
-            { id: 'information-security', name: 'Information Security', icon: 'Shield', color: '#EF4444', progress: 0 },
-            { id: 'internet-of-things', name: 'Internet of Things', icon: 'Wifi', color: '#06B6D4', progress: 0 },
-            { id: 'deep-learning', name: 'Deep Learning', icon: 'Network', color: '#8B5CF6', progress: 0 },
-        ]
-    },
-    {
-        semester: 'Semester 8',
-        courses: [
-            { id: 'major-project', name: 'Major Project Phase - II', icon: 'Rocket', color: '#F59E0B', progress: 0 },
+            { id: 'quantitative-aptitude', name: 'Quantitative Aptitude', icon: 'Calculator', color: '#F97316', progress: 0 },
+            { id: 'logical-reasoning', name: 'Logical / Analytical Reasoning', icon: 'Brain', color: '#EAB308', progress: 0 },
+            { id: 'verbal-ability', name: 'Verbal Ability', icon: 'BookOpen', color: '#06B6D4', progress: 0 },
         ]
     },
 ]
