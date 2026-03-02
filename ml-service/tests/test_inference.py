@@ -1,125 +1,138 @@
-"""Unit tests for inference module."""
+"""
+Tests for Inference Engine — both rules and ML predictions.
+"""
 
 import pytest
-import numpy as np
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.inference import (
-    determine_adaptation_action,
-    run_inference
+    _rules_classify_level,
+    _rules_next_question,
+    _rules_recommend_difficulty,
 )
-from app.schemas import PredictionInput
+from app.schemas import FeatureVector
 
 
-class TestDetermineAdaptationAction:
-    """Tests for the determine_adaptation_action function."""
-    
-    def test_high_gap_returns_add_foundation(self):
-        """High gap score triggers foundation resources."""
-        action = determine_adaptation_action(
-            gap_score=0.8,
-            difficulty_level="hard",
-            accuracy_rate=0.3,
-            failure_rate=0.7
+class TestRulesLevelClassification:
+    """Test rules-based level classification (Phase 2 baseline)."""
+
+    def test_cold_start_returns_beginner(self, cold_start_features):
+        result = _rules_classify_level(cold_start_features)
+        assert result.predicted_level == "beginner"
+        assert result.model_used == "rules"
+
+    def test_low_accuracy_returns_beginner(self, beginner_features):
+        result = _rules_classify_level(beginner_features)
+        assert result.predicted_level == "beginner"
+
+    def test_moderate_accuracy_returns_intermediate(self, intermediate_features):
+        result = _rules_classify_level(intermediate_features)
+        assert result.predicted_level == "intermediate"
+
+    def test_high_accuracy_returns_advanced(self, advanced_features):
+        result = _rules_classify_level(advanced_features)
+        assert result.predicted_level == "advanced"
+
+    def test_few_attempts_defaults_to_beginner(self):
+        """Even with high accuracy, few attempts → beginner."""
+        fv = FeatureVector(
+            total_attempts=3,
+            correct_attempts=3,
+            accuracy=1.0,
+            recent_accuracy=1.0,
         )
-        assert action == "add_foundation_resources"
-    
-    def test_hard_difficulty_high_failure_returns_reduce(self):
-        """Hard difficulty with high failure triggers difficulty reduction."""
-        action = determine_adaptation_action(
-            gap_score=0.4,  # Not high enough to trigger add_foundation
-            difficulty_level="hard",
-            accuracy_rate=0.3,
-            failure_rate=0.7
+        result = _rules_classify_level(fv)
+        assert result.predicted_level == "beginner"
+
+    def test_probabilities_sum_to_one(self, intermediate_features):
+        result = _rules_classify_level(intermediate_features)
+        total = sum(result.probabilities.values())
+        assert abs(total - 1.0) < 0.01
+
+    def test_confidence_increases_with_attempts(self):
+        fv_few = FeatureVector(total_attempts=3, correct_attempts=2, accuracy=0.67)
+        fv_many = FeatureVector(total_attempts=50, correct_attempts=35, accuracy=0.7)
+        r_few = _rules_classify_level(fv_few)
+        r_many = _rules_classify_level(fv_many)
+        assert r_many.confidence > r_few.confidence
+
+
+class TestRulesDifficultyRecommendation:
+    """Test rules-based difficulty recommendation."""
+
+    def test_cold_start_recommends_easy(self, cold_start_features):
+        result = _rules_recommend_difficulty(cold_start_features)
+        assert result.recommended_difficulty == "easy"
+        assert result.model_used == "rules"
+
+    def test_beginner_gets_easy(self, beginner_features):
+        result = _rules_recommend_difficulty(beginner_features)
+        assert result.recommended_difficulty == "easy"
+
+    def test_intermediate_gets_medium(self, intermediate_features):
+        result = _rules_recommend_difficulty(intermediate_features)
+        assert result.recommended_difficulty == "medium"
+
+    def test_advanced_gets_hard(self, advanced_features):
+        result = _rules_recommend_difficulty(advanced_features)
+        assert result.recommended_difficulty == "hard"
+
+    def test_improving_user_gets_harder(self):
+        """Strong positive trend should nudge difficulty up."""
+        fv = FeatureVector(
+            total_attempts=20,
+            correct_attempts=10,
+            accuracy=0.5,
+            recent_accuracy=0.8,
+            accuracy_trend=0.3,
         )
-        assert action == "reduce_difficulty"
-    
-    def test_high_accuracy_returns_increase_difficulty(self):
-        """High accuracy triggers difficulty increase."""
-        action = determine_adaptation_action(
-            gap_score=0.2,
-            difficulty_level="easy",
-            accuracy_rate=0.9,
-            failure_rate=0.1
+        result = _rules_recommend_difficulty(fv)
+        # Intermediate-level user with strong improvement → should get medium or hard
+        assert result.recommended_difficulty in ("medium", "hard")
+
+    def test_declining_user_gets_easier(self):
+        """Strong negative trend should nudge difficulty down."""
+        fv = FeatureVector(
+            total_attempts=30,
+            correct_attempts=22,
+            accuracy=0.73,
+            recent_accuracy=0.5,
+            accuracy_trend=-0.23,
         )
-        assert action == "increase_difficulty"
-    
-    def test_default_continue_current_path(self):
-        """Medium conditions continue current path."""
-        action = determine_adaptation_action(
-            gap_score=0.4,
-            difficulty_level="medium",
-            accuracy_rate=0.6,
-            failure_rate=0.4
+        result = _rules_recommend_difficulty(fv)
+        # Was intermediate but declining → should ease off
+        assert result.recommended_difficulty in ("easy", "medium")
+
+
+class TestRulesNextQuestion:
+    """Test rules-based next question predictor."""
+
+    def test_returns_all_candidate_difficulties(self, intermediate_features):
+        result = _rules_next_question(
+            intermediate_features, ["easy", "medium", "hard"]
         )
-        assert action == "continue_current_path"
+        assert "easy" in result.success_probabilities
+        assert "medium" in result.success_probabilities
+        assert "hard" in result.success_probabilities
 
+    def test_easy_has_highest_success_prob(self, beginner_features):
+        result = _rules_next_question(
+            beginner_features, ["easy", "medium", "hard"]
+        )
+        assert result.success_probabilities["easy"] >= result.success_probabilities["hard"]
 
-class TestPredictFunctions:
-    """Tests for prediction functions - skipped as they require loaded models."""
-    
-    @pytest.mark.skip(reason="Requires loaded model infrastructure")
-    def test_predict_skill_gap_clips_output(self):
-        """Test that skill gap prediction is clipped to [0, 1]."""
-        pass
-    
-    @pytest.mark.skip(reason="Requires loaded model infrastructure")
-    def test_predict_skill_gap_clips_negative(self):
-        """Test that negative skill gap prediction is clipped to 0."""
-        pass
-    
-    @pytest.mark.skip(reason="Requires loaded model infrastructure")
-    def test_predict_difficulty_returns_string(self):
-        """Test that difficulty prediction returns string."""
-        pass
-    
-    @pytest.mark.skip(reason="Requires loaded model infrastructure")
-    def test_predict_ranking_clips_output(self):
-        """Test that ranking prediction is clipped to [0, 1]."""
-        pass
+    def test_optimal_difficulty_targets_70_percent(self, intermediate_features):
+        result = _rules_next_question(
+            intermediate_features, ["easy", "medium", "hard"]
+        )
+        # Optimal should be the one closest to 70%
+        probs = result.success_probabilities
+        target = 0.7
+        expected = min(probs.keys(), key=lambda d: abs(probs[d] - target))
+        assert result.optimal_difficulty == expected
 
-
-class TestRunInference:
-    """Integration tests for run_inference function."""
-    
-    @pytest.fixture
-    def sample_input_dict(self):
-        """Create a sample input dictionary."""
-        return {
-            "user_id": "test-123",
-            "topic_id": "topic-456",
-            "attempt_count": 10,
-            "correct_attempts": 7,
-            "avg_response_time": 2.5,
-            "self_confidence_rating": 0.8,
-            "difficulty_feedback": 3,
-            "session_duration": 300.0,
-            "previous_mastery_score": 0.6,
-            "time_since_last_attempt": 3600.0
-        }
-    
-    @pytest.mark.skip(reason="Requires model loader infrastructure")
-    def test_run_inference_returns_all_fields(self, sample_input_dict):
-        """Test that run_inference returns all expected fields."""
-        # Skipped - requires actual model loader
-        pass
-    
-    @pytest.mark.skip(reason="Requires model loader infrastructure")
-    def test_run_inference_preserves_ids(self, sample_input_dict):
-        """Test that user_id and topic_id are preserved."""
-        # Skipped - requires actual model loader
-        pass
-    
-    @pytest.mark.skip(reason="Requires model loader infrastructure")
-    def test_run_inference_valid_ranges(self, sample_input_dict):
-        """Test that predictions are in valid ranges."""
-        # Skipped - requires actual model loader
-        pass
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    def test_custom_candidates(self, intermediate_features):
+        result = _rules_next_question(
+            intermediate_features, ["easy", "hard"]
+        )
+        assert len(result.success_probabilities) == 2
+        assert "medium" not in result.success_probabilities

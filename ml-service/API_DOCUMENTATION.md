@@ -1,504 +1,328 @@
-# Adaptive Learning Intelligence Engine
+# ML Service API Documentation
 
-## Overview
+Base URL: `http://localhost:8000`
 
-The **Adaptive Learning Intelligence Engine** is a machine learning microservice designed to personalize educational experiences. It analyzes a learner's interaction data and provides intelligent recommendations to optimize their learning path.
-
-### What This Service Does
-
-When a learner interacts with educational content (attempting questions, completing exercises, spending time on topics), this service:
-
-1. **Estimates Skill Gaps** - Identifies how much the learner is struggling with a topic
-2. **Predicts Appropriate Difficulty** - Determines if content is too easy, appropriate, or too hard
-3. **Ranks Topic Priority** - Scores how urgently a topic needs attention
-4. **Recommends Actions** - Suggests what the learning platform should do next
+All endpoints (except `/health`) require the `X-API-Key` header.
 
 ---
 
-## How It Works
+## Authentication
+
+All authenticated endpoints require:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         ADAPTIVE LEARNING ENGINE                            │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   ┌─────────────┐                                                           │
-│   │   Learner   │                                                           │
-│   │ Interaction │──────────┐                                                │
-│   │    Data     │          │                                                │
-│   └─────────────┘          ▼                                                │
-│                    ┌───────────────┐                                        │
-│                    │   Feature     │                                        │
-│                    │  Engineering  │                                        │
-│                    │               │                                        │
-│                    │ • Accuracy    │                                        │
-│                    │ • Persistence │                                        │
-│                    │ • Confidence  │                                        │
-│                    └───────┬───────┘                                        │
-│                            │                                                │
-│              ┌─────────────┼─────────────┐                                  │
-│              ▼             ▼             ▼                                  │
-│      ┌──────────────┐ ┌──────────┐ ┌──────────────┐                         │
-│      │  Skill Gap   │ │Difficulty│ │   Ranking    │                         │
-│      │    Model     │ │  Model   │ │    Model     │                         │
-│      │ (Regression) │ │ (Class.) │ │ (Regression) │                         │
-│      └──────┬───────┘ └────┬─────┘ └──────┬───────┘                         │
-│             │              │              │                                 │
-│             └──────────────┼──────────────┘                                 │
-│                            ▼                                                │
-│                    ┌───────────────┐                                        │
-│                    │  Adaptation   │                                        │
-│                    │    Engine     │                                        │
-│                    └───────┬───────┘                                        │
-│                            │                                                │
-│                            ▼                                                │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                    PERSONALIZED RECOMMENDATIONS                      │   │
-│   │  • Gap Score  • Difficulty Level  • Priority Rank  • Next Action    │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+X-API-Key: <your-api-key>
 ```
+
+Responses:
+
+- `401 Unauthorized` — Missing API key
+- `403 Forbidden` — Invalid API key
 
 ---
 
-## API Reference
+## Endpoints
 
-### Base URL
-```
-http://localhost:8000
-```
+### `GET /health`
 
-### Endpoints
+Health check (no auth required).
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/predict` | POST | Get learning recommendations |
-| `/health` | GET | Check service status |
-| `/metrics` | GET | Prometheus metrics |
+**Response 200:**
 
----
-
-## Making a Prediction Request
-
-### Endpoint
-```
-POST /predict
-```
-
-### Request Format
-
-Send a JSON object with the learner's interaction data:
-
-```json
-{
-  "user_id": "learner-12345",
-  "topic_id": "algebra-quadratic-equations",
-  "attempt_count": 15,
-  "correct_attempts": 9,
-  "avg_response_time": 25.5,
-  "self_confidence_rating": 0.6,
-  "difficulty_feedback": 4,
-  "session_duration": 45.0,
-  "previous_mastery_score": 0.55,
-  "time_since_last_attempt": 48.0
-}
-```
-
-### Input Fields Explained
-
-| Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `user_id` | string | any | Unique identifier for the learner |
-| `topic_id` | string | any | Unique identifier for the learning topic |
-| `attempt_count` | integer | ≥ 0 | Total number of attempts on this topic |
-| `correct_attempts` | integer | ≥ 0 | Number of successful/correct attempts |
-| `avg_response_time` | float | ≥ 0 | Average time (seconds) to answer questions |
-| `self_confidence_rating` | float | 0.0 - 1.0 | Learner's self-reported confidence (0=not confident, 1=very confident) |
-| `difficulty_feedback` | integer | 1 - 5 | Learner's perception of difficulty (1=very easy, 5=very hard) |
-| `session_duration` | float | ≥ 0 | Total time (minutes) spent in current session |
-| `previous_mastery_score` | float | 0.0 - 1.0 | Prior mastery level of this topic (0=none, 1=complete mastery) |
-| `time_since_last_attempt` | float | ≥ 0 | Hours since last interaction with this topic |
-
-### Response Format
-
-```json
-{
-  "skill_gap": {
-    "gap_score": 0.35,
-    "weak": false
-  },
-  "difficulty": {
-    "difficulty_level": "medium"
-  },
-  "ranking": {
-    "ranking_score": 0.72
-  },
-  "adaptation": {
-    "action": "continue_current_path"
-  },
-  "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "prediction_time_ms": 12.5
-}
-```
-
-### Output Fields Explained
-
-#### Skill Gap Assessment
-| Field | Type | Description |
-|-------|------|-------------|
-| `gap_score` | float (0-1) | How much the learner is struggling. **0** = no gap (mastered), **1** = severe gap (struggling significantly) |
-| `weak` | boolean | `true` if gap_score > 0.5, indicating the learner needs additional support |
-
-**Interpretation:**
-- **0.0 - 0.2**: Excellent understanding, learner is performing well
-- **0.2 - 0.4**: Good progress, minor areas for improvement
-- **0.4 - 0.6**: Moderate struggle, may need some help
-- **0.6 - 0.8**: Significant difficulty, intervention recommended
-- **0.8 - 1.0**: Critical gap, urgent support needed
-
-#### Difficulty Assessment
-| Field | Type | Values | Description |
-|-------|------|--------|-------------|
-| `difficulty_level` | string | `"easy"`, `"medium"`, `"hard"` | How appropriate the current content difficulty is for this learner |
-
-**Interpretation:**
-- **easy**: Content is too simple; learner may be bored or under-challenged
-- **medium**: Content difficulty is appropriate for the learner
-- **hard**: Content is challenging; learner may need easier material first
-
-#### Topic Ranking
-| Field | Type | Description |
-|-------|------|-------------|
-| `ranking_score` | float (0-1) | Priority score for this topic. **Higher = more important** to focus on |
-
-**Interpretation:**
-- **0.0 - 0.3**: Low priority - learner is doing well, topic can wait
-- **0.3 - 0.6**: Medium priority - topic needs attention but not urgent
-- **0.6 - 0.8**: High priority - recommend focusing on this topic soon
-- **0.8 - 1.0**: Critical priority - immediate attention needed
-
-#### Adaptation Action
-| Field | Type | Values | Description |
-|-------|------|--------|-------------|
-| `action` | string | See below | Recommended action for the learning platform |
-
-**Possible Actions:**
-
-| Action | Meaning | When Triggered |
-|--------|---------|----------------|
-| `add_foundation_resources` | Provide remedial/prerequisite content | Skill gap > 75% |
-| `reduce_difficulty` | Move to easier content | Hard content + failure rate > 60% |
-| `increase_difficulty` | Move to harder content | Accuracy > 85% |
-| `continue_current_path` | Maintain current learning path | Performance is appropriate |
-
----
-
-## Example Use Cases
-
-### Example 1: Struggling Learner
-
-**Input:**
-```json
-{
-  "user_id": "student-001",
-  "topic_id": "calculus-derivatives",
-  "attempt_count": 20,
-  "correct_attempts": 5,
-  "avg_response_time": 120.0,
-  "self_confidence_rating": 0.2,
-  "difficulty_feedback": 5,
-  "session_duration": 60.0,
-  "previous_mastery_score": 0.3,
-  "time_since_last_attempt": 168.0
-}
-```
-
-**Response:**
-```json
-{
-  "skill_gap": {
-    "gap_score": 0.82,
-    "weak": true
-  },
-  "difficulty": {
-    "difficulty_level": "hard"
-  },
-  "ranking": {
-    "ranking_score": 0.25
-  },
-  "adaptation": {
-    "action": "add_foundation_resources"
-  }
-}
-```
-
-**Interpretation:** This learner is struggling significantly (82% gap). They've only answered 25% correctly, feel unconfident, and perceive the material as very hard. The system recommends adding foundational resources to build prerequisite knowledge.
-
----
-
-### Example 2: High-Performing Learner
-
-**Input:**
-```json
-{
-  "user_id": "student-002",
-  "topic_id": "algebra-linear-equations",
-  "attempt_count": 30,
-  "correct_attempts": 28,
-  "avg_response_time": 8.0,
-  "self_confidence_rating": 0.9,
-  "difficulty_feedback": 1,
-  "session_duration": 25.0,
-  "previous_mastery_score": 0.85,
-  "time_since_last_attempt": 2.0
-}
-```
-
-**Response:**
-```json
-{
-  "skill_gap": {
-    "gap_score": 0.08,
-    "weak": false
-  },
-  "difficulty": {
-    "difficulty_level": "easy"
-  },
-  "ranking": {
-    "ranking_score": 0.91
-  },
-  "adaptation": {
-    "action": "increase_difficulty"
-  }
-}
-```
-
-**Interpretation:** This learner has mastered the topic (93% accuracy, 8% gap). The content feels easy to them. The system recommends increasing difficulty to keep them challenged and engaged.
-
----
-
-### Example 3: Average Learner
-
-**Input:**
-```json
-{
-  "user_id": "student-003",
-  "topic_id": "geometry-triangles",
-  "attempt_count": 15,
-  "correct_attempts": 10,
-  "avg_response_time": 35.0,
-  "self_confidence_rating": 0.6,
-  "difficulty_feedback": 3,
-  "session_duration": 40.0,
-  "previous_mastery_score": 0.6,
-  "time_since_last_attempt": 24.0
-}
-```
-
-**Response:**
-```json
-{
-  "skill_gap": {
-    "gap_score": 0.32,
-    "weak": false
-  },
-  "difficulty": {
-    "difficulty_level": "medium"
-  },
-  "ranking": {
-    "ranking_score": 0.68
-  },
-  "adaptation": {
-    "action": "continue_current_path"
-  }
-}
-```
-
-**Interpretation:** This learner is progressing normally (67% accuracy, 32% gap). The difficulty feels appropriate. The system recommends continuing the current learning path.
-
----
-
-## Integration Examples
-
-### cURL
-```bash
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "learner-123",
-    "topic_id": "math-fractions",
-    "attempt_count": 10,
-    "correct_attempts": 7,
-    "avg_response_time": 15.0,
-    "self_confidence_rating": 0.7,
-    "difficulty_feedback": 3,
-    "session_duration": 30.0,
-    "previous_mastery_score": 0.5,
-    "time_since_last_attempt": 12.0
-  }'
-```
-
-### Python
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:8000/predict",
-    json={
-        "user_id": "learner-123",
-        "topic_id": "math-fractions",
-        "attempt_count": 10,
-        "correct_attempts": 7,
-        "avg_response_time": 15.0,
-        "self_confidence_rating": 0.7,
-        "difficulty_feedback": 3,
-        "session_duration": 30.0,
-        "previous_mastery_score": 0.5,
-        "time_since_last_attempt": 12.0
-    }
-)
-
-result = response.json()
-print(f"Skill Gap: {result['skill_gap']['gap_score']:.0%}")
-print(f"Difficulty: {result['difficulty']['difficulty_level']}")
-print(f"Action: {result['adaptation']['action']}")
-```
-
-### Node.js
-```javascript
-const axios = require('axios');
-
-async function getPrediction(learnerData) {
-  const response = await axios.post('http://localhost:8000/predict', {
-    user_id: learnerData.userId,
-    topic_id: learnerData.topicId,
-    attempt_count: learnerData.attempts,
-    correct_attempts: learnerData.correct,
-    avg_response_time: learnerData.avgTime,
-    self_confidence_rating: learnerData.confidence,
-    difficulty_feedback: learnerData.difficultyRating,
-    session_duration: learnerData.duration,
-    previous_mastery_score: learnerData.mastery,
-    time_since_last_attempt: learnerData.hoursSinceLast
-  });
-
-  return {
-    gapScore: response.data.skill_gap.gap_score,
-    difficulty: response.data.difficulty.difficulty_level,
-    priority: response.data.ranking.ranking_score,
-    recommendedAction: response.data.adaptation.action
-  };
-}
-```
-
----
-
-## Health Check
-
-### Endpoint
-```
-GET /health
-```
-
-### Response
 ```json
 {
   "status": "healthy",
-  "models_loaded": true,
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "models_loaded": {
+    "level_classifier": true,
+    "difficulty_recommender": true
+  },
+  "uptime_seconds": 123.4
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `status` | Service health status (`"healthy"` or `"degraded"`) |
-| `models_loaded` | Whether ML models are loaded and ready |
-| `version` | API version |
+---
+
+### `POST /predict`
+
+Generic prediction (backward-compatible with original mlService.js client).
+
+**Request:**
+
+```json
+{
+  "user_id": "uuid",
+  "topic_id": "uuid",
+  "prediction_type": "level",
+  "features": {}
+}
+```
+
+`prediction_type`: `"level"` | `"difficulty"` | `"next_question"`
+
+**Response 200:**
+
+```json
+{
+  "predicted_level": "intermediate",
+  "recommended_difficulty": "medium",
+  "confidence": 0.85,
+  "model_used": "xgboost_v1",
+  "probabilities": {
+    "beginner": 0.1,
+    "intermediate": 0.75,
+    "advanced": 0.15
+  }
+}
+```
 
 ---
 
-## Error Responses
+### `POST /predict/level`
 
-### Validation Error (422)
-When input data is invalid:
+Predict user skill level for a topic.
+
+**Request:**
+
 ```json
 {
-  "detail": [
+  "user_id": "uuid",
+  "topic_id": "uuid",
+  "features": {}
+}
+```
+
+`features` is optional — if omitted, the service computes them from Supabase.
+
+**Response 200:**
+
+```json
+{
+  "predicted_level": "intermediate",
+  "confidence": 0.85,
+  "probabilities": {
+    "beginner": 0.1,
+    "intermediate": 0.75,
+    "advanced": 0.15
+  },
+  "model_used": "xgboost_v1"
+}
+```
+
+---
+
+### `POST /predict/difficulty`
+
+Get recommended difficulty for the next question.
+
+**Request:**
+
+```json
+{
+  "user_id": "uuid",
+  "topic_id": "uuid",
+  "features": {}
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "recommended_difficulty": "medium",
+  "predicted_success_prob": 0.72,
+  "confidence": 0.88,
+  "model_used": "lightgbm_v1"
+}
+```
+
+---
+
+### `POST /predict/next-question`
+
+Get success probabilities per difficulty level (for question selection).
+
+**Request:**
+
+```json
+{
+  "user_id": "uuid",
+  "topic_id": "uuid",
+  "candidate_difficulties": ["easy", "medium", "hard"],
+  "features": {}
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "success_probabilities": {
+    "easy": 0.92,
+    "medium": 0.71,
+    "hard": 0.35
+  },
+  "optimal_difficulty": "medium",
+  "model_used": "rules_baseline"
+}
+```
+
+The `optimal_difficulty` targets ~70% success probability (zone of proximal development).
+
+---
+
+### `POST /predict/batch`
+
+Batch predictions for multiple topics.
+
+**Request:**
+
+```json
+{
+  "user_id": "uuid",
+  "topic_ids": ["uuid1", "uuid2", "uuid3"]
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "predictions": [
     {
-      "loc": ["body", "self_confidence_rating"],
-      "msg": "ensure this value is less than or equal to 1",
-      "type": "value_error.number.not_le"
+      "topic_id": "uuid1",
+      "predicted_level": "intermediate",
+      "optimal_difficulty": "medium",
+      "confidence": 0.85
+    },
+    {
+      "topic_id": "uuid2",
+      "predicted_level": "beginner",
+      "optimal_difficulty": "easy",
+      "confidence": 0.92
     }
   ]
 }
 ```
 
-### Service Unavailable (503)
-When models are not loaded:
+---
+
+### `GET /features/{user_id}/{topic_id}`
+
+Get computed feature vector for a user-topic pair.
+
+**Response 200:**
+
 ```json
 {
-  "error": "ServiceUnavailable",
-  "detail": "Models are not loaded. Please ensure training has been completed."
+  "total_attempts": 45,
+  "correct_attempts": 32,
+  "accuracy": 0.711,
+  "weighted_score": 28.5,
+  "recent_accuracy": 0.8,
+  "accuracy_trend": 0.089,
+  "streak_length": 3,
+  "avg_time_per_q": 18.2,
+  "days_since_last": 2.5,
+  "easy_accuracy": 0.95,
+  "medium_accuracy": 0.7,
+  "hard_accuracy": 0.35,
+  "global_accuracy": 0.68,
+  "topics_attempted": 8
 }
 ```
 
 ---
 
-## Security (Optional)
+### `POST /cache/invalidate`
 
-### API Key Authentication
-If `API_KEY` environment variable is set, requests must include:
-```
-X-API-Key: your-api-key-here
-```
+Invalidate ML feature cache after new answers.
 
-### Rate Limiting
-Default: 100 requests per 60 seconds per client.
+**Query params:** `user_id` (required), `topic_id` (optional)
 
-Configure via environment variables:
-- `RATE_LIMIT_REQUESTS`: Max requests per window (default: 100)
-- `RATE_LIMIT_WINDOW`: Window size in seconds (default: 60)
+**Response 200:**
 
-Rate limit headers in response:
-```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
+```json
+{
+  "invalidated": true,
+  "user_id": "uuid",
+  "topic_id": "uuid"
+}
 ```
 
 ---
 
-## Summary
+### `GET /metrics`
 
-This service transforms raw learner interaction data into actionable insights:
+Get service metrics (prediction counts, latencies, model performance).
 
-| Input | Output |
-|-------|--------|
-| Attempt counts, response times, confidence ratings | Skill gap score (0-1) |
-| Historical performance, session duration | Recommended difficulty level |
-| Learning patterns, mastery progression | Topic priority ranking |
-| All of the above | Specific action to take |
+**Response 200:**
 
-**Use this service to:**
-- Personalize content difficulty in real-time
-- Identify struggling learners early
-- Prioritize which topics need immediate attention
-- Automate adaptive learning decisions
+```json
+{
+  "total_predictions": 1234,
+  "predictions_by_model": {
+    "level_classifier": 600,
+    "difficulty_recommender": 634
+  },
+  "avg_latency_ms": {
+    "level_classifier": 12.3,
+    "difficulty_recommender": 8.7
+  },
+  "uptime_seconds": 3600
+}
+```
 
 ---
 
-## Quick Start
+### `POST /retrain/trigger`
 
-```bash
-# 1. Start the service
-cd ml-service
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+Trigger model retraining (async, returns immediately).
 
-# 2. Check health
-curl http://localhost:8000/health
+**Response 200:**
 
-# 3. Make predictions
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"test","topic_id":"test","attempt_count":10,"correct_attempts":7,"avg_response_time":20,"self_confidence_rating":0.7,"difficulty_feedback":3,"session_duration":30,"previous_mastery_score":0.5,"time_since_last_attempt":24}'
+```json
+{
+  "status": "triggered",
+  "message": "Retraining started in background"
+}
 ```
+
+---
+
+## Feature Vector (14 dimensions)
+
+| #   | Feature            | Type  | Description                             |
+| --- | ------------------ | ----- | --------------------------------------- |
+| 1   | `total_attempts`   | int   | Total questions attempted on this topic |
+| 2   | `correct_attempts` | int   | Total correct answers on this topic     |
+| 3   | `accuracy`         | float | Overall accuracy (0–1)                  |
+| 4   | `weighted_score`   | float | Difficulty-weighted cumulative score    |
+| 5   | `recent_accuracy`  | float | Accuracy over last 10 answers           |
+| 6   | `accuracy_trend`   | float | Recent – overall (positive = improving) |
+| 7   | `streak_length`    | int   | Consecutive correct/incorrect count     |
+| 8   | `avg_time_per_q`   | float | Average seconds per question            |
+| 9   | `days_since_last`  | float | Days since last attempt on this topic   |
+| 10  | `easy_accuracy`    | float | Accuracy on easy questions              |
+| 11  | `medium_accuracy`  | float | Accuracy on medium questions            |
+| 12  | `hard_accuracy`    | float | Accuracy on hard questions              |
+| 13  | `global_accuracy`  | float | User's accuracy across all topics       |
+| 14  | `topics_attempted` | int   | Number of distinct topics attempted     |
+
+## Error Responses
+
+All errors follow this format:
+
+```json
+{
+  "detail": "Error description"
+}
+```
+
+| Status | Meaning                                    |
+| ------ | ------------------------------------------ |
+| 400    | Bad request (missing fields, invalid type) |
+| 401    | Missing API key                            |
+| 403    | Invalid API key                            |
+| 422    | Validation error (Pydantic)                |
+| 500    | Internal server error                      |

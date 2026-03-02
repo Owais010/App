@@ -1,203 +1,420 @@
 """
-Inference module for the Adaptive Learning Intelligence Engine.
+Inference Engine — Predict levels, difficulty, and next-question success.
 
-Contains all prediction logic and adaptation signal generation.
+Implements the dual-track architecture:
+  - Rules-based baseline (always available, Phase 2)
+  - ML models (when trained & loaded, Phase 6+)
+
+Automatically falls back to rules when:
+  - Models aren't loaded yet (pre-training)
+  - User has too few answers (cold start)
+  - ML confidence is too low
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Dict, Any, Tuple
+import time
+from typing import Optional
 
 import numpy as np
 
-from app.feature_engineering import prepare_feature_vector
-from app.model_loader import get_model_loader
-from app.config import (
-    SKILL_GAP_WEAK_THRESHOLD,
-    ADAPTATION_GAP_HIGH_THRESHOLD,
-    ADAPTATION_ACCURACY_HIGH_THRESHOLD,
-    ADAPTATION_FAILURE_HIGH_THRESHOLD,
-    DIFFICULTY_LABELS
+from app.config import get_settings
+from app.feature_engineering import (
+    FEATURE_NAMES,
+    FeatureVector,
+    feature_vector_to_array,
+    get_features,
 )
-
+from app.model_loader import registry
+from app.schemas import (
+    DifficultyResponse,
+    LevelPredictionResponse,
+    NextQuestionResponse,
+)
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# METRICS (simple counters for monitoring)
+# ─────────────────────────────────────────────────────────────────────────────
 
-def predict_skill_gap(feature_vector: np.ndarray) -> Tuple[float, bool]:
-    """
-    Predict skill gap score using the regression model.
-    
-    Args:
-        feature_vector: Prepared feature vector as numpy array.
-        
-    Returns:
-        Tuple of (gap_score, is_weak).
-    """
-    model_loader = get_model_loader()
-    skill_gap_model = model_loader.skill_gap_model
-    
-    # Predict gap score
-    gap_score = float(skill_gap_model.predict(feature_vector)[0])
-    
-    # Clamp to valid range [0, 1]
-    gap_score = max(0.0, min(1.0, gap_score))
-    
-    # Determine if weak based on threshold
-    is_weak = gap_score > SKILL_GAP_WEAK_THRESHOLD
-    
-    logger.debug(f"Skill gap prediction: score={gap_score:.4f}, weak={is_weak}")
-    
-    return gap_score, is_weak
+_prediction_counts: dict[str, int] = {
+    "level_rules": 0,
+    "level_ml": 0,
+    "difficulty_rules": 0,
+    "difficulty_ml": 0,
+}
+_latency_sums: dict[str, float] = {}
 
 
-def predict_difficulty(feature_vector: np.ndarray) -> str:
-    """
-    Predict difficulty level using the classification model.
-    
-    Args:
-        feature_vector: Prepared feature vector as numpy array.
-        
-    Returns:
-        Difficulty level string ("easy", "medium", or "hard").
-    """
-    model_loader = get_model_loader()
-    difficulty_model = model_loader.difficulty_model
-    
-    # Predict difficulty class
-    difficulty_class = int(difficulty_model.predict(feature_vector)[0])
-    
-    # Convert to label
-    difficulty_level = DIFFICULTY_LABELS.get(difficulty_class, "medium")
-    
-    logger.debug(f"Difficulty prediction: class={difficulty_class}, level={difficulty_level}")
-    
-    return difficulty_level
-
-
-def predict_ranking(feature_vector: np.ndarray) -> float:
-    """
-    Predict engagement ranking score using the scoring model.
-    
-    Args:
-        feature_vector: Prepared feature vector as numpy array.
-        
-    Returns:
-        Ranking score as float, clamped to [0, 1] range.
-    """
-    model_loader = get_model_loader()
-    ranking_model = model_loader.ranking_model
-    
-    # Predict ranking score
-    ranking_score = float(ranking_model.predict(feature_vector)[0])
-    
-    # Clamp to valid range [0, 1]
-    ranking_score = max(0.0, min(1.0, ranking_score))
-    
-    logger.debug(f"Ranking prediction: score={ranking_score:.4f}")
-    
-    return ranking_score
-
-
-def determine_adaptation_action(
-    gap_score: float,
-    difficulty_level: str,
-    accuracy_rate: float,
-    failure_rate: float
-) -> str:
-    """
-    Determine the adaptation action based on prediction results.
-    
-    Rules (in order of priority):
-        1. If gap_score > 0.75 → "add_foundation_resources"
-        2. If difficulty == "hard" AND failure_rate > 0.6 → "reduce_difficulty"
-        3. If accuracy_rate > 0.85 → "increase_difficulty"
-        4. Else → "continue_current_path"
-    
-    Args:
-        gap_score: Predicted skill gap score.
-        difficulty_level: Predicted difficulty level.
-        accuracy_rate: Computed accuracy rate.
-        failure_rate: Computed failure rate.
-        
-    Returns:
-        Adaptation action string.
-    """
-    # Rule 1: High skill gap indicates need for foundational support
-    if gap_score > ADAPTATION_GAP_HIGH_THRESHOLD:
-        action = "add_foundation_resources"
-        logger.debug(f"Adaptation: {action} (gap_score={gap_score:.4f} > {ADAPTATION_GAP_HIGH_THRESHOLD})")
-        return action
-    
-    # Rule 2: Hard content with high failure needs difficulty reduction
-    if difficulty_level == "hard" and failure_rate > ADAPTATION_FAILURE_HIGH_THRESHOLD:
-        action = "reduce_difficulty"
-        logger.debug(f"Adaptation: {action} (difficulty=hard, failure_rate={failure_rate:.4f})")
-        return action
-    
-    # Rule 3: High accuracy indicates readiness for more challenge
-    if accuracy_rate > ADAPTATION_ACCURACY_HIGH_THRESHOLD:
-        action = "increase_difficulty"
-        logger.debug(f"Adaptation: {action} (accuracy_rate={accuracy_rate:.4f} > {ADAPTATION_ACCURACY_HIGH_THRESHOLD})")
-        return action
-    
-    # Default: Continue on current path
-    action = "continue_current_path"
-    logger.debug(f"Adaptation: {action} (default)")
-    return action
-
-
-def run_inference(input_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Run the complete inference pipeline.
-    
-    Flow:
-        1. Prepare feature vector
-        2. Run all model predictions
-        3. Determine adaptation action
-        4. Return unified response
-    
-    Args:
-        input_data: Validated input data dictionary.
-        
-    Returns:
-        Dictionary containing all prediction results.
-    """
-    logger.info(f"Running inference for user={input_data.get('user_id')}, topic={input_data.get('topic_id')}")
-    
-    # Step 1: Feature engineering
-    feature_vector, derived_features = prepare_feature_vector(input_data)
-    
-    # Step 2: Run predictions
-    gap_score, is_weak = predict_skill_gap(feature_vector)
-    difficulty_level = predict_difficulty(feature_vector)
-    ranking_score = predict_ranking(feature_vector)
-    
-    # Step 3: Determine adaptation action
-    adaptation_action = determine_adaptation_action(
-        gap_score=gap_score,
-        difficulty_level=difficulty_level,
-        accuracy_rate=derived_features["accuracy_rate"],
-        failure_rate=derived_features["failure_rate"]
-    )
-    
-    # Step 4: Build response
-    result = {
-        "skill_gap": {
-            "gap_score": round(gap_score, 4),
-            "weak": is_weak
+def get_prediction_stats() -> dict:
+    """Return prediction counts and average latencies."""
+    return {
+        "counts": dict(_prediction_counts),
+        "avg_latency_ms": {
+            k: round(v / max(_prediction_counts.get(k, 1), 1) * 1000, 2)
+            for k, v in _latency_sums.items()
         },
-        "difficulty": {
-            "difficulty_level": difficulty_level
-        },
-        "ranking": {
-            "ranking_score": round(ranking_score, 4)
-        },
-        "adaptation": {
-            "action": adaptation_action
-        }
     }
-    
-    logger.info(f"Inference complete: gap={gap_score:.4f}, difficulty={difficulty_level}, "
-                f"ranking={ranking_score:.4f}, action={adaptation_action}")
-    
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RULES-BASED BASELINE (Phase 2)                                        ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+def _rules_classify_level(fv: FeatureVector) -> LevelPredictionResponse:
+    """
+    Rules-based level classification.
+
+    Uses Laplace-smoothed accuracy with configurable thresholds:
+      - accuracy < 0.5  → beginner
+      - accuracy < 0.75 → intermediate
+      - accuracy >= 0.75 → advanced
+
+    Minimum 5 attempts before trusting (otherwise beginner).
+    """
+    settings = get_settings()
+    alpha = settings.SMOOTHING_ALPHA
+
+    # Laplace-smoothed accuracy
+    smoothed = (fv.correct_attempts + alpha) / (
+        fv.total_attempts + 2 * alpha
+    )
+
+    # Confidence grows with attempts
+    confidence = min(1.0, fv.total_attempts / (settings.MIN_ATTEMPTS * 2))
+
+    if fv.total_attempts < settings.MIN_ATTEMPTS:
+        level = "beginner"
+        probs = {"beginner": 0.8, "intermediate": 0.15, "advanced": 0.05}
+    elif smoothed < settings.INTERMEDIATE_THRESHOLD:
+        level = "beginner"
+        probs = {"beginner": 0.7, "intermediate": 0.2, "advanced": 0.1}
+    elif smoothed < settings.ADVANCED_THRESHOLD:
+        level = "intermediate"
+        probs = {"beginner": 0.1, "intermediate": 0.7, "advanced": 0.2}
+    else:
+        level = "advanced"
+        probs = {"beginner": 0.05, "intermediate": 0.15, "advanced": 0.8}
+
+    return LevelPredictionResponse(
+        predicted_level=level,
+        confidence=round(confidence, 4),
+        probabilities=probs,
+        model_used="rules",
+        features_used=fv,
+    )
+
+
+def _rules_recommend_difficulty(
+    fv: FeatureVector,
+) -> DifficultyResponse:
+    """
+    Rules-based difficulty recommendation.
+
+    Maps level to difficulty with adjustment for trends:
+      beginner    → easy   (medium if improving)
+      intermediate→ medium (hard if improving, easy if declining)
+      advanced    → hard   (medium if declining)
+    """
+    settings = get_settings()
+
+    # Base level
+    if fv.total_attempts < settings.MIN_ATTEMPTS:
+        return DifficultyResponse(
+            recommended_difficulty="easy",
+            predicted_success_prob=0.7,
+            confidence=0.3,
+            model_used="rules",
+            difficulty_probs={"easy": 0.6, "medium": 0.3, "hard": 0.1},
+        )
+
+    # Determine base level from accuracy
+    smoothed = (fv.correct_attempts + settings.SMOOTHING_ALPHA) / (
+        fv.total_attempts + 2 * settings.SMOOTHING_ALPHA
+    )
+
+    if smoothed < settings.INTERMEDIATE_THRESHOLD:
+        base = "easy"
+    elif smoothed < settings.ADVANCED_THRESHOLD:
+        base = "medium"
+    else:
+        base = "hard"
+
+    # Trend adjustment: if improving, nudge harder; if declining, nudge easier
+    trend = fv.accuracy_trend
+    if trend > 0.1 and base == "easy":
+        base = "medium"
+    elif trend > 0.1 and base == "medium":
+        base = "hard"
+    elif trend < -0.1 and base == "hard":
+        base = "medium"
+    elif trend < -0.1 and base == "medium":
+        base = "easy"
+
+    # Estimate success probability
+    diff_acc_map = {
+        "easy": fv.easy_accuracy,
+        "medium": fv.medium_accuracy,
+        "hard": fv.hard_accuracy,
+    }
+    pred_success = diff_acc_map.get(base, fv.accuracy)
+    if pred_success == 0 and fv.total_attempts > 0:
+        # No data at this difficulty; estimate from overall
+        pred_success = fv.accuracy * {"easy": 1.2, "medium": 1.0, "hard": 0.7}[base]
+        pred_success = min(pred_success, 1.0)
+
+    confidence = min(1.0, fv.total_attempts / (settings.MIN_ATTEMPTS * 2))
+
+    # Probability distribution
+    probs = {"easy": 0.0, "medium": 0.0, "hard": 0.0}
+    probs[base] = 0.6
+    remaining = [d for d in probs if d != base]
+    for r in remaining:
+        probs[r] = 0.2
+
+    return DifficultyResponse(
+        recommended_difficulty=base,
+        predicted_success_prob=round(pred_success, 4),
+        confidence=round(confidence, 4),
+        model_used="rules",
+        difficulty_probs=probs,
+    )
+
+
+def _rules_next_question(
+    fv: FeatureVector,
+    candidate_difficulties: list[str],
+) -> NextQuestionResponse:
+    """
+    Rules-based next-question success predictor.
+
+    Estimates P(correct) per difficulty using per-difficulty accuracy
+    with fallback to scaled overall accuracy.
+    Target: ~70% success rate for optimal learning (Zone of Proximal Development).
+    """
+    settings = get_settings()
+
+    scale = {"easy": 1.2, "medium": 1.0, "hard": 0.7}
+    diff_acc = {
+        "easy": fv.easy_accuracy,
+        "medium": fv.medium_accuracy,
+        "hard": fv.hard_accuracy,
+    }
+
+    probs: dict[str, float] = {}
+    for diff in candidate_difficulties:
+        if diff_acc.get(diff, 0) > 0:
+            probs[diff] = round(min(diff_acc[diff], 1.0), 4)
+        else:
+            probs[diff] = round(
+                min(fv.accuracy * scale.get(diff, 1.0), 1.0), 4
+            )
+
+    # Pick difficulty closest to 70% success
+    target = 0.70
+    optimal = min(probs, key=lambda d: abs(probs[d] - target))
+
+    confidence = min(1.0, fv.total_attempts / (settings.MIN_ATTEMPTS * 2))
+
+    return NextQuestionResponse(
+        success_probabilities=probs,
+        optimal_difficulty=optimal,
+        confidence=round(confidence, 4),
+        model_used="rules",
+    )
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  ML-BASED PREDICTIONS (Phase 6+)                                       ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+def _ml_classify_level(fv: FeatureVector) -> Optional[LevelPredictionResponse]:
+    """
+    ML-based level classification using XGBoost.
+
+    Returns None if model isn't loaded (triggers rules fallback).
+    """
+    loaded = registry.get_model("level_classifier")
+    if loaded is None:
+        return None
+
+    try:
+        X = feature_vector_to_array(fv).reshape(1, -1)
+        model = loaded.model
+
+        # Get probabilities
+        proba = model.predict_proba(X)[0]
+        pred_idx = int(np.argmax(proba))
+
+        # Decode label
+        if loaded.label_encoder:
+            classes = loaded.label_encoder.classes_
+        else:
+            classes = np.array(["beginner", "intermediate", "advanced"])
+
+        predicted_level = str(classes[pred_idx])
+        confidence = float(proba[pred_idx])
+
+        probs = {
+            str(classes[i]): round(float(proba[i]), 4)
+            for i in range(len(classes))
+        }
+
+        return LevelPredictionResponse(
+            predicted_level=predicted_level,
+            confidence=round(confidence, 4),
+            probabilities=probs,
+            model_used=f"xgboost_v{loaded.version}",
+            features_used=fv,
+        )
+
+    except Exception as e:
+        logger.error("ML level classification failed: %s", e)
+        return None
+
+
+def _ml_recommend_difficulty(
+    fv: FeatureVector,
+) -> Optional[DifficultyResponse]:
+    """
+    ML-based difficulty recommendation using LightGBM.
+
+    Returns None if model isn't loaded.
+    """
+    loaded = registry.get_model("difficulty_recommender")
+    if loaded is None:
+        return None
+
+    try:
+        X = feature_vector_to_array(fv).reshape(1, -1)
+        model = loaded.model
+
+        proba = model.predict_proba(X)[0]
+        pred_idx = int(np.argmax(proba))
+
+        if loaded.label_encoder:
+            classes = loaded.label_encoder.classes_
+        else:
+            classes = np.array(["easy", "medium", "hard"])
+
+        recommended = str(classes[pred_idx])
+        confidence = float(proba[pred_idx])
+
+        probs = {
+            str(classes[i]): round(float(proba[i]), 4)
+            for i in range(len(classes))
+        }
+
+        # Estimate success prob from per-difficulty accuracy
+        diff_acc = {
+            "easy": fv.easy_accuracy,
+            "medium": fv.medium_accuracy,
+            "hard": fv.hard_accuracy,
+        }
+        pred_success = diff_acc.get(recommended, fv.accuracy)
+
+        return DifficultyResponse(
+            recommended_difficulty=recommended,
+            predicted_success_prob=round(pred_success, 4),
+            confidence=round(confidence, 4),
+            model_used=f"lightgbm_v{loaded.version}",
+            difficulty_probs=probs,
+        )
+
+    except Exception as e:
+        logger.error("ML difficulty recommendation failed: %s", e)
+        return None
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  PUBLIC PREDICTION API                                                  ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+async def predict_level(
+    user_id: str,
+    topic_id: str,
+    precomputed_features: Optional[FeatureVector] = None,
+) -> LevelPredictionResponse:
+    """
+    Predict user level for a topic.
+
+    Uses ML model if available and user has enough data,
+    otherwise falls back to rules.
+    """
+    t0 = time.time()
+    settings = get_settings()
+
+    fv = await get_features(user_id, topic_id, precomputed_features)
+
+    # Try ML first if user has enough data
+    if fv.total_attempts >= settings.MIN_ANSWERS_FOR_ML:
+        ml_result = _ml_classify_level(fv)
+        if ml_result is not None:
+            _prediction_counts["level_ml"] = (
+                _prediction_counts.get("level_ml", 0) + 1
+            )
+            _latency_sums["level_ml"] = (
+                _latency_sums.get("level_ml", 0) + (time.time() - t0)
+            )
+            return ml_result
+
+    # Fall back to rules
+    result = _rules_classify_level(fv)
+    _prediction_counts["level_rules"] = (
+        _prediction_counts.get("level_rules", 0) + 1
+    )
+    _latency_sums["level_rules"] = (
+        _latency_sums.get("level_rules", 0) + (time.time() - t0)
+    )
     return result
+
+
+async def predict_difficulty(
+    user_id: str,
+    topic_id: str,
+    precomputed_features: Optional[FeatureVector] = None,
+) -> DifficultyResponse:
+    """Predict recommended difficulty for next question."""
+    t0 = time.time()
+    settings = get_settings()
+
+    fv = await get_features(user_id, topic_id, precomputed_features)
+
+    if fv.total_attempts >= settings.MIN_ANSWERS_FOR_ML:
+        ml_result = _ml_recommend_difficulty(fv)
+        if ml_result is not None:
+            _prediction_counts["difficulty_ml"] = (
+                _prediction_counts.get("difficulty_ml", 0) + 1
+            )
+            _latency_sums["difficulty_ml"] = (
+                _latency_sums.get("difficulty_ml", 0) + (time.time() - t0)
+            )
+            return ml_result
+
+    result = _rules_recommend_difficulty(fv)
+    _prediction_counts["difficulty_rules"] = (
+        _prediction_counts.get("difficulty_rules", 0) + 1
+    )
+    _latency_sums["difficulty_rules"] = (
+        _latency_sums.get("difficulty_rules", 0) + (time.time() - t0)
+    )
+    return result
+
+
+async def predict_next_question(
+    user_id: str,
+    topic_id: str,
+    candidate_difficulties: list[str] | None = None,
+    precomputed_features: Optional[FeatureVector] = None,
+) -> NextQuestionResponse:
+    """Predict success probability per difficulty for next question."""
+    if candidate_difficulties is None:
+        candidate_difficulties = ["easy", "medium", "hard"]
+
+    fv = await get_features(user_id, topic_id, precomputed_features)
+    return _rules_next_question(fv, candidate_difficulties)

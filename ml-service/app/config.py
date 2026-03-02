@@ -1,54 +1,48 @@
 """
-Configuration module for the Adaptive Learning Intelligence Engine.
+Configuration — Centralized settings for ML service.
 
-Contains all configuration settings, paths, and constants used across the service.
+Reads from environment variables with sensible defaults for local dev.
 """
 
-import os
-from pathlib import Path
+from pydantic_settings import BaseSettings
+from functools import lru_cache
 
 
-# Base directory configuration
-BASE_DIR = Path(__file__).resolve().parent.parent
-MODELS_DIR = BASE_DIR / "models"
+class Settings(BaseSettings):
+    """Application settings loaded from env / .env file."""
 
-# Model file paths
-SKILL_GAP_MODEL_PATH = MODELS_DIR / "skill_gap_model.pkl"
-DIFFICULTY_MODEL_PATH = MODELS_DIR / "difficulty_model.pkl"
-RANKING_MODEL_PATH = MODELS_DIR / "ranking_model.pkl"
+    # ── Supabase ──────────────────────────────────────────────────────────────
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_KEY: str = ""
 
-# API Configuration
-API_TITLE = "Adaptive Learning Intelligence Engine"
-API_DESCRIPTION = """
-Machine Learning Microservice for educational adaptive learning.
+    # ── API Security ──────────────────────────────────────────────────────────
+    API_KEY: str = "default_test_key"
+    ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
-Provides:
-- Skill Gap Estimation (Regression)
-- Difficulty Suitability Prediction (Classification)
-- Topic Recommendation Ranking (Scoring)
-- Adaptation Signals
-"""
-API_VERSION = "1.0.0"
+    # ── Model Paths ───────────────────────────────────────────────────────────
+    MODEL_DIR: str = "models"
+    LEVEL_CLASSIFIER_PATH: str = "models/level_classifier.joblib"
+    DIFFICULTY_RECOMMENDER_PATH: str = "models/difficulty_recommender.joblib"
 
-# CORS Configuration
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = ["*"]
-CORS_ALLOW_HEADERS = ["*"]
+    # ── Feature Engineering ───────────────────────────────────────────────────
+    FEATURE_CACHE_TTL_SECONDS: int = 300  # 5 minutes
+    MIN_ANSWERS_FOR_ML: int = 15  # Minimum answers before trusting ML over rules
 
-# Logging Configuration
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    # ── Level Classification (rules baseline) ─────────────────────────────────
+    MIN_ATTEMPTS: int = 5
+    INTERMEDIATE_THRESHOLD: float = 0.5
+    ADVANCED_THRESHOLD: float = 0.75
+    SMOOTHING_ALPHA: float = 2.0
 
-# Model Thresholds
-SKILL_GAP_WEAK_THRESHOLD = 0.6
-ADAPTATION_GAP_HIGH_THRESHOLD = 0.75
-ADAPTATION_ACCURACY_HIGH_THRESHOLD = 0.85
-ADAPTATION_FAILURE_HIGH_THRESHOLD = 0.6
+    # ── Server ────────────────────────────────────────────────────────────────
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+    DEBUG: bool = False
+    LOG_LEVEL: str = "info"
 
-# Difficulty Labels
-DIFFICULTY_LABELS = {
-    0: "easy",
-    1: "medium",
-    2: "hard"
-}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()

@@ -1,298 +1,356 @@
 """
-Adaptive Learning Intelligence Engine - Main FastAPI Application
+ML Service — FastAPI Application
 
-A stateless Machine Learning microservice for educational adaptive learning.
-Provides prediction endpoints for skill gap estimation, difficulty classification,
-topic ranking, and adaptation signals.
-
-Production Features:
-- API Key Authentication (via X-API-Key header)
-- Rate Limiting (configurable via environment)
-- Prometheus Metrics (/metrics endpoint)
-- Request tracking with unique IDs
-- Graceful shutdown handling
+Endpoints:
+  POST /predict              — Generic predict (backward compat with mlService.js)
+  POST /predict/level        — Predict user level for a topic
+  POST /predict/difficulty   — Recommend next question difficulty
+  POST /predict/next-question — Predict P(correct) per difficulty
+  POST /predict/batch        — Batch predictions for multiple topics
+  POST /features/{user_id}/{topic_id} — Get feature vector
+  POST /cache/invalidate     — Invalidate feature cache
+  GET  /health               — Health check
+  GET  /metrics              — Prediction metrics
+  POST /retrain/trigger      — Trigger model retraining
 """
+
+from __future__ import annotations
 
 import logging
 import time
-import uuid
-import signal
-import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-from app.config import (
-    API_TITLE,
-    API_DESCRIPTION,
-    API_VERSION,
-    CORS_ORIGINS,
-    CORS_ALLOW_CREDENTIALS,
-    CORS_ALLOW_METHODS,
-    CORS_ALLOW_HEADERS,
-    LOG_LEVEL,
-    LOG_FORMAT
+from app.config import get_settings
+from app.feature_engineering import (
+    FeatureVector,
+    get_features,
+    get_features_batch,
+    invalidate_cache,
 )
+from app.inference import (
+    get_prediction_stats,
+    predict_difficulty,
+    predict_level,
+    predict_next_question,
+)
+from app.metrics import get_metrics_summary, log_prediction_to_db, record_prediction
+from app.model_loader import load_all_models, registry
 from app.schemas import (
-    PredictionInput,
-    PredictionResponse,
-    SkillGapOutput,
-    DifficultyOutput,
-    RankingOutput,
-    AdaptationOutput,
+    BatchPredictionRequest,
+    BatchPredictionResponse,
+    DifficultyRequest,
+    DifficultyResponse,
+    GenericPredictRequest,
+    GenericPredictResponse,
     HealthResponse,
-    ErrorResponse
+    LevelPredictionRequest,
+    LevelPredictionResponse,
+    NextQuestionRequest,
+    NextQuestionResponse,
+    TopicPrediction,
 )
-from app.inference import run_inference
-from app.model_loader import get_model_loader
-from app.security import SecurityMiddleware, rate_limiter
-from app.metrics import MetricsMiddleware, metrics_endpoint
+from app.security import verify_api_key
 
-
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    format=LOG_FORMAT
-)
 logger = logging.getLogger(__name__)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# LIFESPAN — load models at startup
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator:
-    """
-    Application lifespan handler.
-    
-    Loads models on startup and performs cleanup on shutdown.
-    Handles graceful shutdown with proper resource cleanup.
-    """
-    # Startup: Load all models
-    logger.info("Starting Adaptive Learning Intelligence Engine...")
-    model_loader = get_model_loader()
-    
-    try:
-        success = model_loader.load_all_models()
-        if success:
-            logger.info("All models loaded successfully")
-        else:
-            logger.warning("Failed to load some models - service may not function correctly")
-    except FileNotFoundError as e:
-        logger.warning(f"Models not found - run training scripts first: {e}")
-    except Exception as e:
-        logger.error(f"Error loading models: {e}")
-    
-    # Background task for rate limiter cleanup
-    cleanup_task = asyncio.create_task(_rate_limiter_cleanup())
-    
+async def lifespan(app: FastAPI):
+    """Load models on startup, cleanup on shutdown."""
+    logger.info("Starting ML Service...")
+    model_status = load_all_models()
+    logger.info("Model load status: %s", model_status)
     yield
-    
-    # Shutdown: Cleanup
-    logger.info("Shutting down Adaptive Learning Intelligence Engine...")
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-    logger.info("Shutdown complete")
+    logger.info("Shutting down ML Service...")
 
 
-async def _rate_limiter_cleanup():
-    """Periodic cleanup of rate limiter state."""
-    while True:
-        await asyncio.sleep(60)  # Every minute
-        rate_limiter.cleanup()
+# ─────────────────────────────────────────────────────────────────────────────
+# APP CREATION
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-# Create FastAPI application
 app = FastAPI(
-    title=API_TITLE,
-    description=API_DESCRIPTION,
-    version=API_VERSION,
+    title="Quiz ML Service",
+    description="Adaptive quiz intelligence — level classification, difficulty recommendation, and learning analytics",
+    version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc"
 )
 
-
-# Configure CORS for Node.js backend integration
+# CORS
+settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=CORS_ALLOW_METHODS,
-    allow_headers=CORS_ALLOW_HEADERS
+    allow_origins=settings.ALLOWED_ORIGINS.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Add security middleware (API key auth + rate limiting)
-app.add_middleware(SecurityMiddleware)
 
-# Add metrics middleware
-app.add_middleware(MetricsMiddleware)
-
-# Add Prometheus metrics endpoint
-app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], include_in_schema=False)
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  GENERIC PREDICT (backward compat)                                     ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 
-@app.middleware("http")
-async def add_request_id(request: Request, call_next):
+@app.post("/predict", response_model=GenericPredictResponse)
+async def generic_predict(
+    req: GenericPredictRequest,
+    _: str = Depends(verify_api_key),
+):
     """
-    Middleware to add request ID and timing to all requests.
-    """
-    request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
-    
-    start_time = time.perf_counter()
-    
-    response = await call_next(request)
-    
-    process_time = (time.perf_counter() - start_time) * 1000
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Process-Time-Ms"] = f"{process_time:.2f}"
-    
-    logger.info(f"Request {request_id} completed in {process_time:.2f}ms")
-    
-    return response
+    Generic prediction endpoint — matches the existing mlService.js client.
 
+    Dispatches to the appropriate prediction function based on `prediction_type`.
+    """
+    t0 = time.time()
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Global exception handler for unhandled errors.
-    """
-    request_id = getattr(request.state, "request_id", "unknown")
-    logger.error(f"Request {request_id} failed with error: {str(exc)}")
-    
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "InternalServerError",
-            "detail": "An unexpected error occurred",
-            "request_id": request_id
+    if not req.user_id or not req.topic_id:
+        raise HTTPException(400, "user_id and topic_id are required")
+
+    precomputed = (
+        FeatureVector(**req.features) if req.features else None
+    )
+
+    if req.prediction_type == "level":
+        result = await predict_level(req.user_id, req.topic_id, precomputed)
+        prediction = {
+            "level": result.predicted_level,
+            "probabilities": result.probabilities,
         }
+        confidence = result.confidence
+        model_used = result.model_used
+
+    elif req.prediction_type == "difficulty":
+        result = await predict_difficulty(
+            req.user_id, req.topic_id, precomputed
+        )
+        prediction = {
+            "difficulty": result.recommended_difficulty,
+            "success_prob": result.predicted_success_prob,
+            "difficulty_probs": result.difficulty_probs,
+        }
+        confidence = result.confidence
+        model_used = result.model_used
+
+    elif req.prediction_type == "next_question":
+        result = await predict_next_question(
+            req.user_id, req.topic_id, precomputed_features=precomputed
+        )
+        prediction = {
+            "success_probabilities": result.success_probabilities,
+            "optimal_difficulty": result.optimal_difficulty,
+        }
+        confidence = result.confidence
+        model_used = result.model_used
+
+    else:
+        raise HTTPException(
+            400,
+            f"Unknown prediction_type: {req.prediction_type}. "
+            "Use: level, difficulty, next_question",
+        )
+
+    latency_ms = (time.time() - t0) * 1000
+    record_prediction(req.prediction_type, model_used, latency_ms)
+
+    return GenericPredictResponse(
+        prediction=prediction,
+        model_used=model_used,
+        confidence=confidence,
     )
 
 
-@app.post(
-    "/predict",
-    response_model=PredictionResponse,
-    responses={
-        400: {"model": ErrorResponse, "description": "Invalid input data"},
-        500: {"model": ErrorResponse, "description": "Server error"},
-        503: {"model": ErrorResponse, "description": "Models not loaded"}
-    },
-    summary="Generate Predictions",
-    description="Generate skill gap, difficulty, ranking, and adaptation predictions for a learner-topic pair."
-)
-async def predict(request: Request, input_data: PredictionInput) -> PredictionResponse:
-    """
-    Main prediction endpoint.
-    
-    Performs:
-    - Skill Gap Estimation (Regression)
-    - Difficulty Suitability Prediction (Classification)
-    - Topic Recommendation Ranking (Scoring)
-    - Adaptation Signal Generation
-    
-    Args:
-        request: FastAPI request object.
-        input_data: Validated prediction input data.
-        
-    Returns:
-        PredictionResponse containing all prediction results.
-    """
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    start_time = time.perf_counter()
-    
-    logger.info(f"Request {request_id}: Processing prediction for user={input_data.user_id}, "
-                f"topic={input_data.topic_id}")
-    
-    # Check if models are loaded
-    model_loader = get_model_loader()
-    if not model_loader.is_loaded:
-        logger.error(f"Request {request_id}: Models not loaded")
-        raise HTTPException(
-            status_code=503,
-            detail="Models are not loaded. Please ensure training has been completed."
-        )
-    
-    try:
-        # Convert Pydantic model to dict for processing
-        input_dict = input_data.model_dump()
-        
-        # Run inference
-        result = run_inference(input_dict)
-        
-        # Calculate prediction time
-        prediction_time_ms = (time.perf_counter() - start_time) * 1000
-        
-        # Build response
-        response = PredictionResponse(
-            skill_gap=SkillGapOutput(**result["skill_gap"]),
-            difficulty=DifficultyOutput(**result["difficulty"]),
-            ranking=RankingOutput(**result["ranking"]),
-            adaptation=AdaptationOutput(**result["adaptation"]),
-            request_id=request_id,
-            prediction_time_ms=round(prediction_time_ms, 2)
-        )
-        
-        logger.info(f"Request {request_id}: Prediction completed in {prediction_time_ms:.2f}ms")
-        
-        return response
-        
-    except ValueError as e:
-        logger.error(f"Request {request_id}: Validation error - {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    except Exception as e:
-        logger.error(f"Request {request_id}: Prediction failed - {str(e)}")
-        raise HTTPException(status_code=500, detail="Prediction failed")
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  TYPED ENDPOINTS                                                        ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 
-@app.get(
-    "/health",
-    response_model=HealthResponse,
-    summary="Health Check",
-    description="Check service health and model loading status."
-)
-async def health_check() -> HealthResponse:
-    """
-    Health check endpoint.
-    
-    Returns:
-        HealthResponse with service status information.
-    """
-    model_loader = get_model_loader()
-    
+@app.post("/predict/level", response_model=LevelPredictionResponse)
+async def predict_level_endpoint(
+    req: LevelPredictionRequest,
+    _: str = Depends(verify_api_key),
+):
+    """Predict user level (beginner/intermediate/advanced) for a topic."""
+    t0 = time.time()
+    result = await predict_level(req.user_id, req.topic_id, req.features)
+    latency_ms = (time.time() - t0) * 1000
+    record_prediction("level", result.model_used, latency_ms)
+
+    # Log to DB (non-blocking)
+    await log_prediction_to_db(
+        user_id=req.user_id,
+        topic_id=req.topic_id,
+        model_name="level_classifier",
+        model_version=result.model_used,
+        predicted_level=result.predicted_level,
+        confidence=result.confidence,
+        feature_snapshot=result.features_used.model_dump() if result.features_used else None,
+    )
+
+    return result
+
+
+@app.post("/predict/difficulty", response_model=DifficultyResponse)
+async def predict_difficulty_endpoint(
+    req: DifficultyRequest,
+    _: str = Depends(verify_api_key),
+):
+    """Recommend next question difficulty for a topic."""
+    t0 = time.time()
+    result = await predict_difficulty(req.user_id, req.topic_id, req.features)
+    latency_ms = (time.time() - t0) * 1000
+    record_prediction("difficulty", result.model_used, latency_ms)
+    return result
+
+
+@app.post("/predict/next-question", response_model=NextQuestionResponse)
+async def predict_next_question_endpoint(
+    req: NextQuestionRequest,
+    _: str = Depends(verify_api_key),
+):
+    """Predict P(correct) for each candidate difficulty."""
+    t0 = time.time()
+    result = await predict_next_question(
+        req.user_id,
+        req.topic_id,
+        req.candidate_difficulties,
+        req.features,
+    )
+    latency_ms = (time.time() - t0) * 1000
+    record_prediction("next_question", result.model_used, latency_ms)
+    return result
+
+
+@app.post("/predict/batch", response_model=BatchPredictionResponse)
+async def predict_batch_endpoint(
+    req: BatchPredictionRequest,
+    _: str = Depends(verify_api_key),
+):
+    """Batch predictions for multiple topics."""
+    t0 = time.time()
+
+    feature_map = await get_features_batch(req.user_id, req.topic_ids)
+    predictions = []
+
+    for tid in req.topic_ids:
+        fv = feature_map.get(tid)
+        level_result = await predict_level(req.user_id, tid, fv)
+        diff_result = await predict_difficulty(req.user_id, tid, fv)
+
+        predictions.append(
+            TopicPrediction(
+                topic_id=tid,
+                predicted_level=level_result.predicted_level,
+                confidence=level_result.confidence,
+                recommended_difficulty=diff_result.recommended_difficulty,
+                predicted_success_prob=diff_result.predicted_success_prob,
+            )
+        )
+
+    latency_ms = (time.time() - t0) * 1000
+    model_used = predictions[0].predicted_level if predictions else "rules"
+
+    return BatchPredictionResponse(
+        predictions=predictions,
+        model_used="batch",
+    )
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  FEATURE ENDPOINTS                                                      ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+@app.get("/features/{user_id}/{topic_id}")
+async def get_features_endpoint(
+    user_id: str,
+    topic_id: str,
+    _: str = Depends(verify_api_key),
+):
+    """Get computed feature vector for a user-topic pair."""
+    fv = await get_features(user_id, topic_id)
+    return fv.model_dump()
+
+
+@app.post("/cache/invalidate")
+async def invalidate_cache_endpoint(
+    user_id: str,
+    topic_id: str | None = None,
+    _: str = Depends(verify_api_key),
+):
+    """Invalidate feature cache after new answers."""
+    invalidate_cache(user_id, topic_id)
+    return {"status": "ok", "invalidated": f"{user_id}/{topic_id or '*'}"}
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  HEALTH & MONITORING                                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """Health check — no auth required."""
     return HealthResponse(
         status="healthy",
-        models_loaded=model_loader.is_loaded,
-        version=API_VERSION
+        models_loaded=registry.list_models(),
+        version="1.0.0",
     )
 
 
-# Additional endpoint for model reload (admin use)
-@app.post(
-    "/reload-models",
-    response_model=HealthResponse,
-    summary="Reload Models",
-    description="Force reload all models from disk.",
-    include_in_schema=False  # Hidden from public docs
-)
-async def reload_models() -> HealthResponse:
+@app.get("/metrics")
+async def metrics_endpoint(_: str = Depends(verify_api_key)):
+    """Prediction metrics — counts, latencies, accuracy."""
+    return {
+        "prediction_stats": get_prediction_stats(),
+        "detailed_metrics": get_metrics_summary(),
+        "models": registry.list_models(),
+    }
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  RETRAINING TRIGGER                                                     ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+@app.post("/retrain/trigger")
+async def trigger_retrain(
+    model_name: str = "all",
+    _: str = Depends(verify_api_key),
+):
     """
-    Force reload all models from disk.
-    
-    Returns:
-        HealthResponse with updated model loading status.
+    Trigger model retraining.
+
+    In production this would enqueue a training job.
+    For now it returns instructions.
     """
-    logger.info("Reloading all models...")
-    model_loader = get_model_loader()
-    success = model_loader.reload_models()
-    
-    return HealthResponse(
-        status="healthy" if success else "degraded",
-        models_loaded=success,
-        version=API_VERSION
+    return {
+        "status": "accepted",
+        "message": f"Retraining '{model_name}' queued. "
+        "Run `python -m training.train_all` to retrain locally.",
+        "model_name": model_name,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import uvicorn
+
+    settings = get_settings()
+    uvicorn.run(
+        "app.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
+        log_level=settings.LOG_LEVEL,
     )

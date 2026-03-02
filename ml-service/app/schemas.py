@@ -1,89 +1,148 @@
 """
-Pydantic schemas for request/response validation.
+Pydantic Schemas — Request/response models for the ML API.
 
-Defines all input and output data structures for the ML service API.
+Every payload is validated here before reaching inference code.
 """
 
-from pydantic import BaseModel, Field, field_validator
-from typing import Literal
+from __future__ import annotations
+
+from typing import Optional
+from pydantic import BaseModel, Field
 
 
-class PredictionInput(BaseModel):
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  FEATURE VECTOR                                                         ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class FeatureVector(BaseModel):
     """
-    Input schema for prediction requests.
-    
-    All fields are required and validated for correct types and ranges.
+    14-dimensional feature vector matching `compute_ml_features` RPC.
     """
-    user_id: str = Field(..., description="Unique identifier for the user")
-    topic_id: str = Field(..., description="Unique identifier for the topic")
-    attempt_count: int = Field(..., ge=1, description="Total number of attempts")
-    correct_attempts: int = Field(..., ge=0, description="Number of correct attempts")
-    avg_response_time: float = Field(..., ge=0, description="Average response time in seconds")
-    self_confidence_rating: float = Field(..., ge=0, le=1, description="User's self-confidence rating (0-1)")
-    difficulty_feedback: int = Field(..., ge=1, le=5, description="User's difficulty feedback (1-5)")
-    session_duration: float = Field(..., gt=0, description="Session duration in minutes")
-    previous_mastery_score: float = Field(..., ge=0, le=1, description="Previous mastery score (0-1)")
-    time_since_last_attempt: float = Field(..., ge=0, description="Time since last attempt in hours")
-
-    @field_validator('correct_attempts')
-    @classmethod
-    def correct_attempts_must_not_exceed_total(cls, v, info):
-        """Validate that correct attempts don't exceed total attempts."""
-        if 'attempt_count' in info.data and v > info.data['attempt_count']:
-            raise ValueError('correct_attempts cannot exceed attempt_count')
-        return v
+    total_attempts: int = Field(0, ge=0)
+    correct_attempts: int = Field(0, ge=0)
+    accuracy: float = Field(0.0, ge=0.0, le=1.0)
+    weighted_score: float = Field(0.0, ge=0.0)
+    recent_accuracy: float = Field(0.0, ge=0.0, le=1.0)
+    accuracy_trend: float = Field(0.0, ge=-1.0, le=1.0)
+    streak_length: int = Field(0, ge=0)
+    avg_time_per_q: float = Field(0.0, ge=0.0)
+    days_since_last: float = Field(-1.0)
+    easy_accuracy: float = Field(0.0, ge=0.0, le=1.0)
+    medium_accuracy: float = Field(0.0, ge=0.0, le=1.0)
+    hard_accuracy: float = Field(0.0, ge=0.0, le=1.0)
+    global_accuracy: float = Field(0.0, ge=0.0, le=1.0)
+    topics_attempted: int = Field(0, ge=0)
 
 
-class SkillGapOutput(BaseModel):
-    """Output schema for skill gap estimation."""
-    gap_score: float = Field(..., ge=0, le=1, description="Estimated skill gap score (0-1)")
-    weak: bool = Field(..., description="True if gap_score > 0.6")
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  LEVEL PREDICTION                                                       ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class LevelPredictionRequest(BaseModel):
+    user_id: str
+    topic_id: str
+    features: Optional[FeatureVector] = None  # If omitted, fetched from DB
 
 
-class DifficultyOutput(BaseModel):
-    """Output schema for difficulty classification."""
-    difficulty_level: Literal["easy", "medium", "hard"] = Field(
-        ..., 
-        description="Predicted difficulty level"
-    )
+class LevelPredictionResponse(BaseModel):
+    predicted_level: str  # beginner | intermediate | advanced
+    confidence: float
+    probabilities: dict[str, float]  # {"beginner": 0.1, "intermediate": 0.3, "advanced": 0.6}
+    model_used: str  # "rules" | "xgboost_v1"
+    features_used: Optional[FeatureVector] = None
 
 
-class RankingOutput(BaseModel):
-    """Output schema for recommendation ranking."""
-    ranking_score: float = Field(..., description="Engagement success score for ranking")
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  DIFFICULTY RECOMMENDATION                                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class DifficultyRequest(BaseModel):
+    user_id: str
+    topic_id: str
+    features: Optional[FeatureVector] = None
 
 
-class AdaptationOutput(BaseModel):
-    """Output schema for adaptation signals."""
-    action: Literal[
-        "add_foundation_resources",
-        "reduce_difficulty",
-        "increase_difficulty",
-        "continue_current_path"
-    ] = Field(..., description="Recommended adaptation action")
+class DifficultyResponse(BaseModel):
+    recommended_difficulty: str  # easy | medium | hard
+    predicted_success_prob: float
+    confidence: float
+    model_used: str
+    difficulty_probs: dict[str, float]
 
 
-class PredictionResponse(BaseModel):
-    """
-    Unified response schema combining all prediction outputs.
-    """
-    skill_gap: SkillGapOutput
-    difficulty: DifficultyOutput
-    ranking: RankingOutput
-    adaptation: AdaptationOutput
-    request_id: str = Field(..., description="Unique identifier for the request")
-    prediction_time_ms: float = Field(..., description="Time taken for prediction in milliseconds")
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  NEXT QUESTION PREDICTION                                               ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
+class NextQuestionRequest(BaseModel):
+    user_id: str
+    topic_id: str
+    candidate_difficulties: list[str] = ["easy", "medium", "hard"]
+    features: Optional[FeatureVector] = None
+
+
+class NextQuestionResponse(BaseModel):
+    success_probabilities: dict[str, float]  # per difficulty
+    optimal_difficulty: str  # targets ~70% success rate
+    confidence: float
+    model_used: str
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  BATCH PREDICTION                                                       ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class BatchPredictionRequest(BaseModel):
+    user_id: str
+    topic_ids: list[str]
+
+
+class TopicPrediction(BaseModel):
+    topic_id: str
+    predicted_level: str
+    confidence: float
+    recommended_difficulty: str
+    predicted_success_prob: float
+
+
+class BatchPredictionResponse(BaseModel):
+    predictions: list[TopicPrediction]
+    model_used: str
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  GENERIC PREDICT (backward compat with existing mlService.js client)    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+class GenericPredictRequest(BaseModel):
+    """Matches the payload from src/lib/mlService.js `getMLPrediction()`."""
+    user_id: Optional[str] = None
+    topic_id: Optional[str] = None
+    features: Optional[dict] = None
+    prediction_type: str = "level"  # level | difficulty | next_question
+
+
+class GenericPredictResponse(BaseModel):
+    prediction: dict
+    model_used: str
+    confidence: float
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  HEALTH / MONITORING                                                    ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
 
 class HealthResponse(BaseModel):
-    """Health check response schema."""
-    status: str = Field(..., description="Service health status")
-    models_loaded: bool = Field(..., description="Whether all models are loaded")
-    version: str = Field(..., description="API version")
+    status: str
+    models_loaded: dict[str, bool]
+    version: str
 
 
-class ErrorResponse(BaseModel):
-    """Error response schema."""
-    error: str = Field(..., description="Error type")
-    detail: str = Field(..., description="Error details")
-    request_id: str = Field(default=None, description="Request identifier if available")
+class ModelMetrics(BaseModel):
+    model_name: str
+    version: str
+    accuracy: Optional[float] = None
+    f1: Optional[float] = None
+    auc: Optional[float] = None
+    predictions_served: int = 0
+    avg_latency_ms: float = 0.0

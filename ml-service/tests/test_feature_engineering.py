@@ -1,243 +1,75 @@
-"""Unit tests for feature engineering module."""
+"""
+Tests for Feature Engineering module.
+"""
 
-import pytest
 import numpy as np
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import pytest
 
 from app.feature_engineering import (
-    compute_derived_features,
-    prepare_feature_vector,
-    get_feature_names,
-    compute_gap_score_label,
-    compute_difficulty_label,
-    compute_engagement_score
+    FEATURE_NAMES,
+    FeatureVector,
+    _empty_features,
+    feature_vector_to_array,
+    invalidate_cache,
 )
 
 
-class TestComputeDerivedFeatures:
-    """Tests for compute_derived_features function."""
-    
-    def test_normal_input(self):
-        """Test with typical input values."""
-        input_data = {
-            "attempt_count": 10,
-            "correct_attempts": 7,
-            "session_duration": 300.0,
-            "previous_mastery_score": 0.6,
-            "self_confidence_rating": 0.8,
-            "difficulty_feedback": 3
-        }
-        result = compute_derived_features(input_data)
-        
-        assert "accuracy_rate" in result
-        assert "failure_rate" in result
-        assert "learning_velocity" in result
-        assert "confidence_performance_gap" in result
-        assert "difficulty_stress_index" in result
-        assert "persistence_score" in result
-        
-        assert result["accuracy_rate"] == pytest.approx(0.7, rel=0.01)
-        assert result["failure_rate"] == pytest.approx(0.3, rel=0.01)
-        assert result["failure_rate"] == pytest.approx(1.0 - result["accuracy_rate"], rel=0.01)
-    
-    def test_zero_attempts(self):
-        """Test handling of zero attempt_count (division by zero)."""
-        input_data = {
-            "attempt_count": 0,
-            "correct_attempts": 0,
-            "session_duration": 100.0,
-            "previous_mastery_score": 0.5,
-            "self_confidence_rating": 0.5,
-            "difficulty_feedback": 3
-        }
-        result = compute_derived_features(input_data)
-        
-        assert result["accuracy_rate"] == 0.0
-        assert result["failure_rate"] == 1.0
-    
-    def test_zero_session_duration(self):
-        """Test handling of zero session_duration (division by zero)."""
-        input_data = {
-            "attempt_count": 5,
-            "correct_attempts": 3,
-            "session_duration": 0.0,
-            "previous_mastery_score": 0.5,
-            "self_confidence_rating": 0.5,
-            "difficulty_feedback": 3
-        }
-        result = compute_derived_features(input_data)
-        
-        assert result["learning_velocity"] == 0.0
-    
-    def test_perfect_accuracy(self):
-        """Test case with 100% accuracy."""
-        input_data = {
-            "attempt_count": 10,
-            "correct_attempts": 10,
-            "session_duration": 300.0,
-            "previous_mastery_score": 0.9,
-            "self_confidence_rating": 0.9,
-            "difficulty_feedback": 2
-        }
-        result = compute_derived_features(input_data)
-        
-        assert result["accuracy_rate"] == 1.0
-        assert result["failure_rate"] == 0.0
-        assert result["difficulty_stress_index"] == 0.0
+class TestFeatureVector:
+    """Test FeatureVector schema and conversions."""
+
+    def test_empty_features_returns_valid_vector(self):
+        fv = _empty_features()
+        assert fv.total_attempts == 0
+        assert fv.accuracy == 0.0
+        assert fv.days_since_last == -1.0  # sentinel
+
+    def test_feature_vector_to_array_length(self, beginner_features):
+        arr = feature_vector_to_array(beginner_features)
+        assert len(arr) == 14
+        assert arr.dtype == np.float64
+
+    def test_feature_vector_to_array_order(self, intermediate_features):
+        arr = feature_vector_to_array(intermediate_features)
+        # Verify canonical order matches FEATURE_NAMES
+        for i, name in enumerate(FEATURE_NAMES):
+            assert arr[i] == getattr(intermediate_features, name), f"Mismatch at {name}"
+
+    def test_feature_names_count(self):
+        assert len(FEATURE_NAMES) == 14
+
+    def test_validation_clamps_accuracy(self):
+        """Accuracy must be [0, 1]."""
+        fv = FeatureVector(accuracy=0.5)
+        assert 0 <= fv.accuracy <= 1
+
+    def test_validation_rejects_negative_attempts(self):
+        """total_attempts must be >= 0."""
+        with pytest.raises(Exception):
+            FeatureVector(total_attempts=-1)
 
 
-class TestPrepareFeatureVector:
-    """Tests for prepare_feature_vector function."""
-    
-    def test_feature_count(self):
-        """Test that feature vector has correct length."""
-        input_data = {
-            "attempt_count": 10,
-            "correct_attempts": 7,
-            "avg_response_time": 2.5,
-            "self_confidence_rating": 0.8,
-            "difficulty_feedback": 3,
-            "session_duration": 300.0,
-            "previous_mastery_score": 0.6,
-            "time_since_last_attempt": 3600.0
-        }
-        
-        vector, derived = prepare_feature_vector(input_data)
-        feature_names = get_feature_names()
-        
-        # Shape is (1, 14) so check second dimension
-        assert vector.shape[1] == len(feature_names)
-        assert vector.shape[1] == 14
+class TestFeatureCache:
+    """Test in-memory cache operations."""
 
-    def test_feature_order(self):
-        """Test that features are in expected order."""
-        input_data = {
-            "attempt_count": 10,
-            "correct_attempts": 7,
-            "avg_response_time": 2.5,
-            "self_confidence_rating": 0.8,
-            "difficulty_feedback": 3,
-            "session_duration": 300.0,
-            "previous_mastery_score": 0.6,
-            "time_since_last_attempt": 3600.0
-        }
-        
-        vector, derived = prepare_feature_vector(input_data)
-        
-        # vector is shape (1, 14), access as vector[0]
-        assert vector[0, 0] == 10       # attempt_count
-        assert vector[0, 1] == 7        # correct_attempts
-        assert vector[0, 2] == 2.5      # avg_response_time
-        assert vector[0, 8] == pytest.approx(0.7, rel=0.01)  # accuracy_rate
+    def test_invalidate_specific_topic(self):
+        from app.feature_engineering import _cache
 
+        _cache[("u1", "t1")] = (0, _empty_features())
+        _cache[("u1", "t2")] = (0, _empty_features())
+        invalidate_cache("u1", "t1")
+        assert ("u1", "t1") not in _cache
+        assert ("u1", "t2") in _cache
+        # Cleanup
+        _cache.clear()
 
-class TestGetFeatureNames:
-    """Tests for get_feature_names function."""
-    
-    def test_returns_list(self):
-        """Test that function returns a list."""
-        names = get_feature_names()
-        assert isinstance(names, list)
-    
-    def test_correct_count(self):
-        """Test correct number of feature names."""
-        names = get_feature_names()
-        assert len(names) == 14
-    
-    def test_expected_names(self):
-        """Test that expected names are present."""
-        names = get_feature_names()
-        assert "attempt_count" in names
-        assert "accuracy_rate" in names
-        assert "failure_rate" in names
-        assert "persistence_score" in names
+    def test_invalidate_all_topics_for_user(self):
+        from app.feature_engineering import _cache
 
-
-class TestComputeGapScoreLabel:
-    """Tests for compute_gap_score_label function."""
-    
-    def test_high_gap(self):
-        """Test high skill gap (struggling learner)."""
-        derived = {"failure_rate": 0.8, "confidence_performance_gap": 0.5}
-        gap = compute_gap_score_label(derived, previous_mastery_score=0.2)
-        
-        assert 0.0 <= gap <= 1.0
-        assert gap > 0.5
-
-    def test_low_gap(self):
-        """Test low skill gap (proficient learner)."""
-        derived = {"failure_rate": 0.1, "confidence_performance_gap": 0.1}
-        gap = compute_gap_score_label(derived, previous_mastery_score=0.9)
-        
-        assert 0.0 <= gap <= 1.0
-        assert gap < 0.3
-
-
-class TestComputeDifficultyLabel:
-    """Tests for compute_difficulty_label function."""
-    
-    def test_easy(self):
-        """Test classification as easy."""
-        label = compute_difficulty_label(accuracy_rate=0.9)
-        assert label == 0
-    
-    def test_medium(self):
-        """Test classification as medium."""
-        label = compute_difficulty_label(accuracy_rate=0.6)
-        assert label == 1
-    
-    def test_hard(self):
-        """Test classification as hard."""
-        label = compute_difficulty_label(accuracy_rate=0.3)
-        assert label == 2
-    
-    def test_boundary_easy_medium(self):
-        """Test boundary between easy and medium."""
-        assert compute_difficulty_label(0.81) == 0
-        assert compute_difficulty_label(0.80) == 1
-    
-    def test_boundary_medium_hard(self):
-        """Test boundary between medium and hard."""
-        assert compute_difficulty_label(0.50) == 1
-        assert compute_difficulty_label(0.49) == 2
-
-
-class TestComputeEngagementScore:
-    """Tests for compute_engagement_score function."""
-    
-    def test_produces_valid_range(self):
-        """Test that output is in valid range."""
-        score = compute_engagement_score(
-            accuracy_rate=0.7,
-            persistence_score=10.0,
-            gap_score=0.3
-        )
-        
-        assert 0.0 <= score <= 1.0
-    
-    def test_high_performer(self):
-        """Test high performer gets high score."""
-        score = compute_engagement_score(
-            accuracy_rate=0.95,
-            persistence_score=50.0,  # Will be capped to 1.0 in normalization
-            gap_score=0.1
-        )
-        
-        assert score > 0.7
-    
-    def test_low_performer(self):
-        """Test low performer gets low score.""" 
-        score = compute_engagement_score(
-            accuracy_rate=0.2,
-            persistence_score=2.0,
-            gap_score=0.8
-        )
-        
-        assert score < 0.4
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        _cache[("u1", "t1")] = (0, _empty_features())
+        _cache[("u1", "t2")] = (0, _empty_features())
+        _cache[("u2", "t1")] = (0, _empty_features())
+        invalidate_cache("u1")
+        assert ("u1", "t1") not in _cache
+        assert ("u1", "t2") not in _cache
+        assert ("u2", "t1") in _cache
+        _cache.clear()

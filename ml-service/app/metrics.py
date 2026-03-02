@@ -1,174 +1,173 @@
 """
-Prometheus metrics middleware and endpoint.
+Metrics — Prometheus-compatible monitoring for ML predictions.
 
-Exposes /metrics endpoint with standard HTTP metrics:
-- request_count (Counter)
-- request_latency (Histogram)
-- model_prediction_latency (Histogram)
-- active_requests (Gauge)
+Tracks:
+  - Prediction counts (by model type and prediction type)
+  - Latency distributions
+  - Model accuracy (when actuals are supplied)
+  - Feature distribution drift
 """
 
-import time
-import logging
-from typing import Callable
-from functools import wraps
+from __future__ import annotations
 
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import PlainTextResponse
+import logging
+import time
+from collections import defaultdict
+from typing import Optional
+
+import httpx
+
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# COUNTERS & ACCUMULATORS
+# ─────────────────────────────────────────────────────────────────────────────
 
-# =============================================================================
-# SIMPLE METRICS COLLECTOR (No external dependencies)
-# =============================================================================
+_counters: dict[str, int] = defaultdict(int)
+_latencies: dict[str, list[float]] = defaultdict(list)
+_accuracy_buffer: list[dict] = []  # recent predictions with actuals
 
-class MetricsCollector:
-    """
-    Lightweight metrics collector compatible with Prometheus text format.
-    
-    Does not require prometheus_client library.
-    For production, replace with prometheus_client for full functionality.
-    """
-    
-    def __init__(self):
-        self.request_count = {}       # {(method, path, status): count}
-        self.request_latency_sum = {} # {(method, path): sum_ms}
-        self.request_latency_count = {}
-        self.prediction_count = 0
-        self.prediction_latency_sum = 0.0
-        self.prediction_latency_count = 0
-        self.active_requests = 0
-        self.startup_time = time.time()
-    
-    def record_request(self, method: str, path: str, status: int, latency_ms: float):
-        """Record an HTTP request."""
-        key = (method, path, status)
-        self.request_count[key] = self.request_count.get(key, 0) + 1
-        
-        latency_key = (method, path)
-        self.request_latency_sum[latency_key] = self.request_latency_sum.get(latency_key, 0) + latency_ms
-        self.request_latency_count[latency_key] = self.request_latency_count.get(latency_key, 0) + 1
-    
-    def record_prediction(self, latency_ms: float):
-        """Record a model prediction."""
-        self.prediction_count += 1
-        self.prediction_latency_sum += latency_ms
-        self.prediction_latency_count += 1
-    
-    def get_prometheus_metrics(self) -> str:
-        """Generate Prometheus text format metrics."""
-        lines = []
-        
-        # Request count
-        lines.append("# HELP http_requests_total Total HTTP requests")
-        lines.append("# TYPE http_requests_total counter")
-        for (method, path, status), count in self.request_count.items():
-            path_label = path.replace('"', '\\"')
-            lines.append(f'http_requests_total{{method="{method}",path="{path_label}",status="{status}"}} {count}')
-        
-        # Request latency
-        lines.append("# HELP http_request_duration_ms HTTP request duration in milliseconds")
-        lines.append("# TYPE http_request_duration_ms summary")
-        for (method, path), total in self.request_latency_sum.items():
-            count = self.request_latency_count[(method, path)]
-            avg = total / count if count > 0 else 0
-            path_label = path.replace('"', '\\"')
-            lines.append(f'http_request_duration_ms_sum{{method="{method}",path="{path_label}"}} {total:.2f}')
-            lines.append(f'http_request_duration_ms_count{{method="{method}",path="{path_label}"}} {count}')
-        
-        # Prediction metrics
-        lines.append("# HELP model_predictions_total Total model predictions")
-        lines.append("# TYPE model_predictions_total counter")
-        lines.append(f"model_predictions_total {self.prediction_count}")
-        
-        lines.append("# HELP model_prediction_duration_ms Model prediction duration in milliseconds")
-        lines.append("# TYPE model_prediction_duration_ms summary")
-        lines.append(f"model_prediction_duration_ms_sum {self.prediction_latency_sum:.2f}")
-        lines.append(f"model_prediction_duration_ms_count {self.prediction_latency_count}")
-        
-        if self.prediction_latency_count > 0:
-            avg_latency = self.prediction_latency_sum / self.prediction_latency_count
-            lines.append(f"model_prediction_duration_ms_avg {avg_latency:.2f}")
-        
-        # Active requests
-        lines.append("# HELP http_requests_active Current active HTTP requests")
-        lines.append("# TYPE http_requests_active gauge")
-        lines.append(f"http_requests_active {self.active_requests}")
-        
-        # Uptime
-        uptime_seconds = time.time() - self.startup_time
-        lines.append("# HELP process_uptime_seconds Process uptime in seconds")
-        lines.append("# TYPE process_uptime_seconds counter")
-        lines.append(f"process_uptime_seconds {uptime_seconds:.2f}")
-        
-        return "\n".join(lines) + "\n"
+MAX_LATENCY_BUFFER = 1000
+MAX_ACCURACY_BUFFER = 5000
 
 
-# Global metrics collector
-metrics_collector = MetricsCollector()
+def record_prediction(
+    prediction_type: str,
+    model_used: str,
+    latency_ms: float,
+) -> None:
+    """Record a prediction event."""
+    key = f"{prediction_type}:{model_used}"
+    _counters[key] += 1
+    _counters[f"total:{prediction_type}"] += 1
+
+    _latencies[key].append(latency_ms)
+    if len(_latencies[key]) > MAX_LATENCY_BUFFER:
+        _latencies[key] = _latencies[key][-MAX_LATENCY_BUFFER:]
 
 
-def record_prediction_metric(func: Callable) -> Callable:
-    """Decorator to record prediction metrics."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        start = time.perf_counter()
-        result = func(*args, **kwargs)
-        latency = (time.perf_counter() - start) * 1000
-        metrics_collector.record_prediction(latency)
-        return result
-    return wrapper
-
-
-# =============================================================================
-# METRICS MIDDLEWARE
-# =============================================================================
-
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """Middleware to collect HTTP request metrics."""
-    
-    SKIP_PATHS = {"/metrics"}  # Don't record metrics endpoint itself
-    
-    async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        method = request.method
-        
-        # Skip metrics endpoint
-        if path in self.SKIP_PATHS:
-            return await call_next(request)
-        
-        metrics_collector.active_requests += 1
-        start_time = time.perf_counter()
-        
-        try:
-            response = await call_next(request)
-            latency_ms = (time.perf_counter() - start_time) * 1000
-            
-            # Normalize path for metrics (avoid high cardinality)
-            normalized_path = self._normalize_path(path)
-            metrics_collector.record_request(method, normalized_path, response.status_code, latency_ms)
-            
-            return response
-        finally:
-            metrics_collector.active_requests -= 1
-    
-    def _normalize_path(self, path: str) -> str:
-        """Normalize path to avoid high cardinality metrics."""
-        # Keep only known paths, normalize unknown ones
-        known_paths = {"/predict", "/health", "/reload-models", "/docs", "/redoc", "/openapi.json"}
-        return path if path in known_paths else "/other"
-
-
-# =============================================================================
-# METRICS ENDPOINT
-# =============================================================================
-
-async def metrics_endpoint(request: Request) -> Response:
-    """Prometheus metrics endpoint."""
-    metrics_text = metrics_collector.get_prometheus_metrics()
-    return PlainTextResponse(
-        content=metrics_text,
-        media_type="text/plain; version=0.0.4; charset=utf-8"
+def record_actual(
+    prediction_type: str,
+    predicted: str,
+    actual: str,
+    user_id: str,
+    topic_id: str,
+) -> None:
+    """Record actual outcome for a past prediction (for accuracy tracking)."""
+    _accuracy_buffer.append(
+        {
+            "type": prediction_type,
+            "predicted": predicted,
+            "actual": actual,
+            "user_id": user_id,
+            "topic_id": topic_id,
+            "timestamp": time.time(),
+        }
     )
+    if len(_accuracy_buffer) > MAX_ACCURACY_BUFFER:
+        _accuracy_buffer.pop(0)
+
+
+def get_metrics_summary() -> dict:
+    """Get full metrics summary for /metrics endpoint."""
+    summary = {
+        "prediction_counts": dict(_counters),
+        "latency_stats": {},
+        "accuracy": {},
+    }
+
+    # Latency percentiles
+    for key, values in _latencies.items():
+        if not values:
+            continue
+        import numpy as np
+
+        arr = np.array(values)
+        summary["latency_stats"][key] = {
+            "count": len(arr),
+            "mean_ms": round(float(np.mean(arr)), 2),
+            "p50_ms": round(float(np.percentile(arr, 50)), 2),
+            "p95_ms": round(float(np.percentile(arr, 95)), 2),
+            "p99_ms": round(float(np.percentile(arr, 99)), 2),
+        }
+
+    # Online accuracy (last N predictions with actuals)
+    if _accuracy_buffer:
+        correct = sum(
+            1 for r in _accuracy_buffer if r["predicted"] == r["actual"]
+        )
+        summary["accuracy"] = {
+            "total_evaluated": len(_accuracy_buffer),
+            "correct": correct,
+            "accuracy": round(correct / len(_accuracy_buffer), 4),
+        }
+
+        # Per prediction type
+        by_type: dict[str, dict] = {}
+        for r in _accuracy_buffer:
+            t = r["type"]
+            if t not in by_type:
+                by_type[t] = {"total": 0, "correct": 0}
+            by_type[t]["total"] += 1
+            if r["predicted"] == r["actual"]:
+                by_type[t]["correct"] += 1
+
+        for t, d in by_type.items():
+            d["accuracy"] = (
+                round(d["correct"] / d["total"], 4) if d["total"] > 0 else 0
+            )
+        summary["accuracy"]["by_type"] = by_type
+
+    return summary
+
+
+async def log_prediction_to_db(
+    user_id: str,
+    topic_id: Optional[str],
+    model_name: str,
+    model_version: str,
+    predicted_level: Optional[str] = None,
+    predicted_prob: Optional[float] = None,
+    confidence: Optional[float] = None,
+    feature_snapshot: Optional[dict] = None,
+) -> None:
+    """
+    Log a prediction to the ml_predictions table for offline evaluation.
+    Non-blocking — failures are silently logged.
+    """
+    settings = get_settings()
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_KEY:
+        return
+
+    url = f"{settings.SUPABASE_URL}/rest/v1/ml_predictions"
+    headers = {
+        "apikey": settings.SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+    payload = {
+        "user_id": user_id,
+        "topic_id": topic_id,
+        "model_name": model_name,
+        "model_version": model_version,
+        "predicted_level": predicted_level,
+        "predicted_prob": predicted_prob,
+        "confidence": confidence,
+        "feature_snapshot": feature_snapshot,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code not in (200, 201):
+                logger.debug(
+                    "Failed to log prediction: %s %s",
+                    resp.status_code,
+                    resp.text,
+                )
+    except Exception as e:
+        logger.debug("Prediction logging error (non-fatal): %s", e)

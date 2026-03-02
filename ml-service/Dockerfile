@@ -1,45 +1,28 @@
-# Adaptive Learning Intelligence Engine
-# Docker Configuration
+FROM python:3.13-slim
 
-FROM python:3.11-slim
-
-# Set working directory
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
-
-# Install system dependencies
+# Install system deps for LightGBM
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    curl \
+    libgomp1 curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Install Python deps
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app/ ./app/
-COPY models/ ./models/
-COPY training/ ./training/
+COPY app/ app/
+COPY training/ training/
+COPY data/ data/
+COPY models/ models/
 
-# Create non-root user for security
-RUN useradd -m -u 1000 mluser && \
-    chown -R mluser:mluser /app
+# Generate training data and train models at build time
+RUN python -m training.train_all --rows 10000
 
-USER mluser
-
-# Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

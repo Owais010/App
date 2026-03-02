@@ -1,105 +1,229 @@
-"""Integration tests for FastAPI endpoints."""
+"""
+Tests for API endpoints.
+"""
 
 import pytest
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from fastapi.testclient import TestClient
-from app.main import app
-
-
-@pytest.fixture
-def client():
-    """Create a test client."""
-    return TestClient(app)
-
-
-@pytest.fixture
-def valid_payload():
-    """Create valid request payload."""
-    return {
-        "user_id": "test-learner-123",
-        "topic_id": "topic-456",
-        "attempt_count": 10,
-        "correct_attempts": 7,
-        "avg_response_time": 2.5,
-        "self_confidence_rating": 0.8,
-        "difficulty_feedback": 3,
-        "session_duration": 300.0,
-        "previous_mastery_score": 0.6,
-        "time_since_last_attempt": 3600.0
-    }
 
 
 class TestHealthEndpoint:
-    """Tests for /health endpoint."""
-    
-    def test_health_returns_ok(self, client):
-        """Test health endpoint returns status ok."""
-        response = client.get("/health")
-        
-        assert response.status_code == 200
-        data = response.json()
+    """Test the /health endpoint (no auth required)."""
+
+    def test_health_returns_200(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        data = resp.json()
         assert data["status"] == "healthy"
         assert "models_loaded" in data
 
-
-class TestPredictEndpoint:
-    """Tests for /predict endpoint - requires models loaded."""
-    
-    @pytest.mark.skip(reason="Requires models to be loaded in test environment")
-    def test_predict_valid_input(self, client, valid_payload):
-        """Test prediction with valid input."""
-        pass
-    
-    def test_predict_missing_field(self, client, valid_payload):
-        """Test prediction with missing required field."""
-        del valid_payload["attempt_count"]
-        
-        response = client.post("/predict", json=valid_payload)
-        
-        assert response.status_code == 422
-    
-    def test_predict_invalid_type(self, client, valid_payload):
-        """Test prediction with invalid data type."""
-        valid_payload["attempt_count"] = "not-a-number"
-        
-        response = client.post("/predict", json=valid_payload)
-        
-        assert response.status_code == 422
-    
-    def test_predict_negative_value(self, client, valid_payload):
-        """Test prediction with negative value where positive required."""
-        valid_payload["attempt_count"] = -5
-        
-        response = client.post("/predict", json=valid_payload)
-        
-        assert response.status_code == 422
-    
-    def test_predict_out_of_range_confidence(self, client, valid_payload):
-        """Test with confidence rating out of [0,1] range."""
-        valid_payload["self_confidence_rating"] = 1.5
-        
-        response = client.post("/predict", json=valid_payload)
-        
-        assert response.status_code == 422
+    def test_health_includes_version(self, client):
+        resp = client.get("/health")
+        assert resp.json()["version"] == "1.0.0"
 
 
-class TestInputValidation:
-    """Tests for input validation."""
-    
-    def test_difficulty_feedback_range(self, client, valid_payload):
-        """Test difficulty_feedback validation."""
-        valid_payload["difficulty_feedback"] = 0
-        response = client.post("/predict", json=valid_payload)
-        assert response.status_code == 422
-        
-        valid_payload["difficulty_feedback"] = 6
-        response = client.post("/predict", json=valid_payload)
-        assert response.status_code == 422
+class TestAuthSecurity:
+    """Test API key authentication."""
+
+    def test_missing_api_key_returns_401(self, client):
+        resp = client.post("/predict", json={
+            "user_id": "u1",
+            "topic_id": "t1",
+            "prediction_type": "level",
+        })
+        assert resp.status_code == 401
+
+    def test_wrong_api_key_returns_403(self, client):
+        resp = client.post(
+            "/predict",
+            json={"user_id": "u1", "topic_id": "t1", "prediction_type": "level"},
+            headers={"X-API-Key": "wrong_key"},
+        )
+        assert resp.status_code == 403
+
+    def test_valid_api_key_passes(self, client, auth_headers):
+        resp = client.post(
+            "/predict",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "prediction_type": "level",
+                "features": {
+                    "total_attempts": 10,
+                    "correct_attempts": 6,
+                    "accuracy": 0.6,
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+class TestGenericPredictEndpoint:
+    """Test the /predict endpoint (backward compat)."""
+
+    def test_level_prediction(self, client, auth_headers):
+        resp = client.post(
+            "/predict",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "prediction_type": "level",
+                "features": {
+                    "total_attempts": 20,
+                    "correct_attempts": 15,
+                    "accuracy": 0.75,
+                    "weighted_score": 10.0,
+                    "recent_accuracy": 0.8,
+                    "accuracy_trend": 0.05,
+                    "streak_length": 5,
+                    "avg_time_per_q": 12.0,
+                    "days_since_last": 2.0,
+                    "easy_accuracy": 0.9,
+                    "medium_accuracy": 0.75,
+                    "hard_accuracy": 0.5,
+                    "global_accuracy": 0.7,
+                    "topics_attempted": 8,
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "prediction" in data
+        assert "level" in data["prediction"]
+        assert data["model_used"] == "rules"
+
+    def test_difficulty_prediction(self, client, auth_headers):
+        resp = client.post(
+            "/predict",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "prediction_type": "difficulty",
+                "features": {
+                    "total_attempts": 5,
+                    "correct_attempts": 2,
+                    "accuracy": 0.4,
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "difficulty" in data["prediction"]
+
+    def test_unknown_type_returns_400(self, client, auth_headers):
+        resp = client.post(
+            "/predict",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "prediction_type": "unknown",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+    def test_missing_user_id_returns_400(self, client, auth_headers):
+        resp = client.post(
+            "/predict",
+            json={"prediction_type": "level"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+
+class TestTypedEndpoints:
+    """Test typed prediction endpoints."""
+
+    def test_predict_level(self, client, auth_headers):
+        resp = client.post(
+            "/predict/level",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "features": {
+                    "total_attempts": 50,
+                    "correct_attempts": 42,
+                    "accuracy": 0.84,
+                    "recent_accuracy": 0.9,
+                    "easy_accuracy": 0.95,
+                    "medium_accuracy": 0.85,
+                    "hard_accuracy": 0.7,
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["predicted_level"] == "advanced"
+        assert "probabilities" in data
+
+    def test_predict_difficulty(self, client, auth_headers):
+        resp = client.post(
+            "/predict/difficulty",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "features": {
+                    "total_attempts": 10,
+                    "correct_attempts": 6,
+                    "accuracy": 0.6,
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["recommended_difficulty"] in ("easy", "medium", "hard")
+
+    def test_predict_next_question(self, client, auth_headers):
+        resp = client.post(
+            "/predict/next-question",
+            json={
+                "user_id": "u1",
+                "topic_id": "t1",
+                "candidate_difficulties": ["easy", "medium", "hard"],
+                "features": {
+                    "total_attempts": 25,
+                    "correct_attempts": 15,
+                    "accuracy": 0.6,
+                    "easy_accuracy": 0.8,
+                    "medium_accuracy": 0.6,
+                    "hard_accuracy": 0.3,
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "success_probabilities" in data
+        assert "optimal_difficulty" in data
+
+    def test_predict_batch(self, client, auth_headers):
+        resp = client.post(
+            "/predict/batch",
+            json={
+                "user_id": "u1",
+                "topic_ids": ["t1", "t2"],
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["predictions"]) == 2
+
+
+class TestMetricsEndpoint:
+    """Test /metrics endpoint."""
+
+    def test_metrics_requires_auth(self, client):
+        resp = client.get("/metrics")
+        assert resp.status_code == 401
+
+    def test_metrics_returns_structure(self, client, auth_headers):
+        resp = client.get("/metrics", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "prediction_stats" in data
+        assert "models" in data

@@ -1,22 +1,24 @@
-# Models Directory
+# ML Models
 
-This directory contains trained model files:
+Trained models are stored here in joblib format.
 
-- `skill_gap_model.pkl` - Skill Gap Regression Model (GradientBoostingRegressor)
-- `difficulty_model.pkl` - Difficulty Classification Model (RandomForestClassifier)
-- `ranking_model.pkl` - Ranking Scoring Model (GradientBoostingRegressor)
+## Files
 
-## Generating Models
+- `level_classifier.joblib` — XGBoost multiclass (beginner/intermediate/advanced)
+- `difficulty_recommender.joblib` — LightGBM multiclass (easy/medium/hard)
 
-Run the training pipeline to generate models:
+## Training
 
 ```bash
 cd ml-service
-python training/train_all.py
+python -m training.train_all --rows 10000
 ```
 
-This will:
+Models are bundled as dicts containing:
 
-1. Generate synthetic training data
-2. Train all three models
-3. Save model files to this directory
+- `model` — trained sklearn/xgboost/lightgbm estimator
+- `label_encoder` — LabelEncoder for target classes
+- `feature_names` — list of 14 feature names in canonical order
+- `version` — semantic version string
+- `metrics` — training metrics (accuracy, f1, auc, etc.)
+- `feature_importance` — dict of feature_name → importance score

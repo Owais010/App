@@ -1,167 +1,242 @@
 """
-Synthetic Data Generator for Training.
+Synthetic Data Generator — Produce realistic training data.
 
-Generates realistic training data for the Adaptive Learning Intelligence Engine.
-This script creates a CSV file with the required input schema.
+Generates user-topic feature vectors with known ground-truth labels
+for training level classifiers and difficulty recommenders.
+
+The generated data models realistic learner behavior patterns:
+  - Beginners: low accuracy, slow, few attempts
+  - Intermediate: moderate accuracy, medium speed, building streaks
+  - Advanced: high accuracy, fast, many attempts, strong hard-question perf
+
+Usage:
+    python -m training.generate_data --rows 10000 --output data/training_data.csv
 """
 
+from __future__ import annotations
+
+import argparse
+import logging
+import random
 import sys
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import pandas as pd
 import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LEARNER ARCHETYPES
+# ─────────────────────────────────────────────────────────────────────────────
+
+ARCHETYPES = {
+    "beginner": {
+        "weight": 0.35,
+        "accuracy": (0.15, 0.48),
+        "attempts": (1, 20),
+        "weighted_score": (0.0, 3.0),
+        "recent_accuracy": (0.1, 0.5),
+        "trend": (-0.15, 0.10),
+        "streak": (0, 3),
+        "avg_time": (15, 60),
+        "days_since": (0, 90),
+        "easy_acc": (0.3, 0.7),
+        "medium_acc": (0.1, 0.4),
+        "hard_acc": (0.0, 0.2),
+        "global_acc": (0.15, 0.45),
+        "topics_attempted": (1, 5),
+    },
+    "intermediate": {
+        "weight": 0.40,
+        "accuracy": (0.45, 0.74),
+        "attempts": (8, 60),
+        "weighted_score": (2.0, 12.0),
+        "recent_accuracy": (0.4, 0.8),
+        "trend": (-0.05, 0.15),
+        "streak": (0, 8),
+        "avg_time": (8, 35),
+        "days_since": (0, 45),
+        "easy_acc": (0.6, 0.95),
+        "medium_acc": (0.4, 0.75),
+        "hard_acc": (0.1, 0.45),
+        "global_acc": (0.4, 0.7),
+        "topics_attempted": (3, 15),
+    },
+    "advanced": {
+        "weight": 0.25,
+        "accuracy": (0.72, 0.98),
+        "attempts": (15, 150),
+        "weighted_score": (8.0, 40.0),
+        "recent_accuracy": (0.7, 1.0),
+        "trend": (-0.05, 0.10),
+        "streak": (2, 20),
+        "avg_time": (5, 20),
+        "days_since": (0, 30),
+        "easy_acc": (0.85, 1.0),
+        "medium_acc": (0.7, 0.95),
+        "hard_acc": (0.45, 0.9),
+        "global_acc": (0.65, 0.92),
+        "topics_attempted": (5, 25),
+    },
+}
 
 
-def generate_training_data(n_samples: int = 5000, random_seed: int = 42) -> pd.DataFrame:
-    """
-    Generate synthetic training data with realistic distributions.
-    
-    Args:
-        n_samples: Number of samples to generate.
-        random_seed: Random seed for reproducibility.
-        
-    Returns:
-        DataFrame with training data.
-    """
-    np.random.seed(random_seed)
-    
-    # Generate base features with realistic distributions
-    data = {
-        "user_id": [f"user_{i:05d}" for i in range(n_samples)],
-        "topic_id": [f"topic_{np.random.randint(1, 101):03d}" for _ in range(n_samples)],
-        
-        # Attempt count: typically 1-50, skewed towards lower values
-        "attempt_count": np.maximum(1, np.random.exponential(10, n_samples).astype(int)),
-        
-        # Average response time in seconds: 5-180 seconds
-        "avg_response_time": np.clip(np.random.gamma(5, 10, n_samples), 5, 180),
-        
-        # Self confidence rating: 0-1, beta distribution
-        "self_confidence_rating": np.clip(np.random.beta(4, 3, n_samples), 0, 1),
-        
-        # Difficulty feedback: 1-5, discrete
-        "difficulty_feedback": np.random.randint(1, 6, n_samples),
-        
-        # Session duration in minutes: 5-120 minutes
-        "session_duration": np.clip(np.random.gamma(10, 5, n_samples), 5, 120),
-        
-        # Previous mastery score: 0-1, beta distribution
-        "previous_mastery_score": np.clip(np.random.beta(3, 2, n_samples), 0, 1),
-        
-        # Time since last attempt in hours: 0-720 hours (30 days)
-        "time_since_last_attempt": np.clip(np.random.exponential(48, n_samples), 0, 720)
+def _sample_uniform(low: float, high: float) -> float:
+    """Sample uniformly in [low, high]."""
+    return random.uniform(low, high)
+
+
+def _sample_int(low: int, high: int) -> int:
+    return random.randint(low, high)
+
+
+def generate_row(archetype: str) -> dict:
+    """Generate one training row for a given archetype."""
+    cfg = ARCHETYPES[archetype]
+
+    accuracy = _sample_uniform(*cfg["accuracy"])
+    attempts = _sample_int(*cfg["attempts"])
+    correct = int(round(accuracy * attempts))
+    correct = min(correct, attempts)
+
+    # Add noise (±5% of accuracy)
+    noise = random.gauss(0, 0.03)
+
+    row = {
+        "total_attempts": attempts,
+        "correct_attempts": correct,
+        "accuracy": round(min(max(accuracy + noise, 0), 1), 4),
+        "weighted_score": round(_sample_uniform(*cfg["weighted_score"]), 4),
+        "recent_accuracy": round(
+            min(max(_sample_uniform(*cfg["recent_accuracy"]) + noise, 0), 1), 4
+        ),
+        "accuracy_trend": round(_sample_uniform(*cfg["trend"]), 4),
+        "streak_length": _sample_int(*cfg["streak"]),
+        "avg_time_per_q": round(_sample_uniform(*cfg["avg_time"]), 2),
+        "days_since_last": round(_sample_uniform(*cfg["days_since"]), 2),
+        "easy_accuracy": round(
+            min(max(_sample_uniform(*cfg["easy_acc"]) + noise, 0), 1), 4
+        ),
+        "medium_accuracy": round(
+            min(max(_sample_uniform(*cfg["medium_acc"]) + noise, 0), 1), 4
+        ),
+        "hard_accuracy": round(
+            min(max(_sample_uniform(*cfg["hard_acc"]) + noise, 0), 1), 4
+        ),
+        "global_accuracy": round(
+            min(max(_sample_uniform(*cfg["global_acc"]) + noise, 0), 1), 4
+        ),
+        "topics_attempted": _sample_int(*cfg["topics_attempted"]),
+        # Labels
+        "level": archetype,
+        "optimal_difficulty": _optimal_difficulty(archetype, accuracy),
     }
-    
-    # Generate correct attempts based on attempt count
-    # Use a varying success rate for different learners
-    success_rates = np.random.beta(3, 2, n_samples)  # Varying per learner
-    data["correct_attempts"] = np.minimum(
-        data["attempt_count"],
-        np.random.binomial(data["attempt_count"], success_rates)
+
+    return row
+
+
+def _optimal_difficulty(level: str, accuracy: float) -> str:
+    """
+    Determine optimal difficulty targeting ~70% success rate.
+
+    Zone of Proximal Development:
+      - If accuracy at current level is >80%, push harder
+      - If accuracy at current level is <50%, pull back
+    """
+    if level == "beginner":
+        if accuracy > 0.6:
+            return "medium"
+        return "easy"
+    elif level == "intermediate":
+        if accuracy > 0.8:
+            return "hard"
+        elif accuracy < 0.5:
+            return "easy"
+        return "medium"
+    else:  # advanced
+        if accuracy < 0.6:
+            return "medium"
+        return "hard"
+
+
+def generate_dataset(n_rows: int, seed: int = 42) -> pd.DataFrame:
+    """Generate a full synthetic dataset with realistic distributions."""
+    random.seed(seed)
+    np.random.seed(seed)
+
+    rows = []
+    weights = [ARCHETYPES[a]["weight"] for a in ARCHETYPES]
+    archetypes = list(ARCHETYPES.keys())
+
+    for _ in range(n_rows):
+        arch = random.choices(archetypes, weights=weights, k=1)[0]
+        rows.append(generate_row(arch))
+
+    df = pd.DataFrame(rows)
+
+    # Add some edge cases
+    # Cold-start users (very few attempts)
+    for _ in range(int(n_rows * 0.05)):
+        row = generate_row("beginner")
+        row["total_attempts"] = random.randint(0, 3)
+        row["correct_attempts"] = random.randint(0, row["total_attempts"])
+        row["accuracy"] = (
+            row["correct_attempts"] / max(row["total_attempts"], 1)
+        )
+        row["recent_accuracy"] = row["accuracy"]
+        row["streak_length"] = row["correct_attempts"]
+        rows.append(row)
+
+    # Returning power users
+    for _ in range(int(n_rows * 0.03)):
+        row = generate_row("advanced")
+        row["days_since_last"] = random.uniform(60, 365)
+        row["recent_accuracy"] = max(
+            row["accuracy"] - random.uniform(0.1, 0.3), 0
+        )
+        row["accuracy_trend"] = round(
+            row["recent_accuracy"] - row["accuracy"], 4
+        )
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+    logger.info(
+        "Generated %d rows: %s",
+        len(df),
+        df["level"].value_counts().to_dict(),
     )
-    
-    # Ensure correct_attempts doesn't exceed attempt_count
-    data["correct_attempts"] = np.minimum(data["correct_attempts"], data["attempt_count"])
-    
-    df = pd.DataFrame(data)
-    
-    # Reorder columns
-    column_order = [
-        "user_id", "topic_id", "attempt_count", "correct_attempts",
-        "avg_response_time", "self_confidence_rating", "difficulty_feedback",
-        "session_duration", "previous_mastery_score", "time_since_last_attempt"
-    ]
-    df = df[column_order]
-    
     return df
 
 
-def print_data_statistics(df: pd.DataFrame) -> None:
-    """Print statistics about the generated data."""
-    print("\n" + "="*60)
-    print("GENERATED DATA STATISTICS")
-    print("="*60)
-    
-    print(f"\nTotal samples: {len(df)}")
-    print(f"\nUnique users: {df['user_id'].nunique()}")
-    print(f"Unique topics: {df['topic_id'].nunique()}")
-    
-    print("\n" + "-"*40)
-    print("Numeric Column Statistics:")
-    print("-"*40)
-    
-    numeric_cols = [
-        "attempt_count", "correct_attempts", "avg_response_time",
-        "self_confidence_rating", "difficulty_feedback", "session_duration",
-        "previous_mastery_score", "time_since_last_attempt"
-    ]
-    
-    for col in numeric_cols:
-        print(f"\n{col}:")
-        print(f"  Min: {df[col].min():.2f}")
-        print(f"  Max: {df[col].max():.2f}")
-        print(f"  Mean: {df[col].mean():.2f}")
-        print(f"  Std: {df[col].std():.2f}")
-    
-    # Compute and show accuracy distribution
-    accuracy = df["correct_attempts"] / df["attempt_count"]
-    print(f"\nDerived accuracy_rate:")
-    print(f"  Min: {accuracy.min():.2f}")
-    print(f"  Max: {accuracy.max():.2f}")
-    print(f"  Mean: {accuracy.mean():.2f}")
-    print(f"  Std: {accuracy.std():.2f}")
-    
-    # Show difficulty distribution based on accuracy
-    easy = (accuracy > 0.8).sum()
-    medium = ((accuracy >= 0.5) & (accuracy <= 0.8)).sum()
-    hard = (accuracy < 0.5).sum()
-    
-    print(f"\nExpected difficulty distribution:")
-    print(f"  Easy (accuracy > 0.8): {easy} ({100*easy/len(df):.1f}%)")
-    print(f"  Medium (0.5 <= accuracy <= 0.8): {medium} ({100*medium/len(df):.1f}%)")
-    print(f"  Hard (accuracy < 0.5): {hard} ({100*hard/len(df):.1f}%)")
-
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    """Generate and save training data."""
-    print("="*60)
-    print("SYNTHETIC DATA GENERATOR")
-    print("="*60)
-    
-    # Parse command line arguments
-    n_samples = 5000
-    if len(sys.argv) > 1:
-        try:
-            n_samples = int(sys.argv[1])
-        except ValueError:
-            print(f"Invalid sample count: {sys.argv[1]}")
-            sys.exit(1)
-    
-    print(f"\nGenerating {n_samples} samples...")
-    
-    # Generate data
-    df = generate_training_data(n_samples=n_samples)
-    
-    # Print statistics
-    print_data_statistics(df)
-    
-    # Save to CSV
-    data_dir = Path(__file__).parent.parent / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    
-    output_path = data_dir / "training_data.csv"
-    df.to_csv(output_path, index=False)
-    
-    print(f"\n" + "="*60)
-    print(f"Data saved to: {output_path}")
-    print("="*60)
-    
-    # Show sample rows
-    print("\nSample rows:")
-    print(df.head(5).to_string())
+    parser = argparse.ArgumentParser(description="Generate synthetic ML training data")
+    parser.add_argument("--rows", type=int, default=10000, help="Number of rows")
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="data/training_data.csv",
+        help="Output CSV path",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO)
+
+    df = generate_dataset(args.rows, args.seed)
+
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
+    print(f"Saved {len(df)} rows to {out_path}")
+    print(f"Level distribution:\n{df['level'].value_counts()}")
+    print(f"Difficulty distribution:\n{df['optimal_difficulty'].value_counts()}")
 
 
 if __name__ == "__main__":
