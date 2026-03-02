@@ -87,8 +87,11 @@ class AssessmentCompleter {
         continue;
       }
 
-      const isCorrect = question.correct_option === answer.selectedOption;
-      const isSkipped = !answer.selectedOption;
+      const isSkipped =
+        answer.selectedOption === null || answer.selectedOption === undefined;
+      const isCorrect = isSkipped
+        ? false
+        : question.correct_option === answer.selectedOption;
       const weight = getDifficultyWeight(question.difficulty);
       const maxWeight = getMaxWeight();
 
@@ -98,8 +101,8 @@ class AssessmentCompleter {
         assessment_question_id: answer.assessmentQuestionId || null,
         topic_id: question.topic_id,
         subject_id: question.subject_id,
-        selected_option: answer.selectedOption || null,
-        is_correct: isSkipped ? null : isCorrect,
+        selected_option: isSkipped ? null : answer.selectedOption,
+        is_correct: isCorrect,
         is_skipped: isSkipped,
         difficulty: question.difficulty,
         time_taken_seconds: answer.timeTakenSeconds || null,
@@ -484,7 +487,7 @@ class AssessmentCompleter {
           ),
         ];
         for (const tid of affectedTopicIds) {
-          invalidateMLCache(userId, tid).catch(() => { });
+          invalidateMLCache(userId, tid).catch(() => {});
         }
       } catch (_) {
         // ML service unavailable — non-critical
@@ -576,27 +579,30 @@ class AssessmentCompleter {
         assessmentId,
         score: totalCorrect,
         total: processedAnswers.length,
-        overallAccuracy: totalAttempted > 0 ? parseFloat((totalCorrect / totalAttempted).toFixed(4)) : 0,
+        overallAccuracy:
+          totalAttempted > 0
+            ? parseFloat((totalCorrect / totalAttempted).toFixed(4))
+            : 0,
 
         weakTopics: updatedTopics
           .sort((a, b) => a.accuracy - b.accuracy)
           .slice(0, 5)
           .map((t) => {
-            const rec = recommendations.find(r => r.topic_id === t.topic_id);
+            const rec = recommendations.find((r) => r.topic_id === t.topic_id);
             return {
               topic: rec?.topic_name || t.topic_id,
               accuracy: parseFloat(t.accuracy) || 0,
-              level: t.level || 'beginner'
+              level: t.level || "beginner",
             };
           }),
 
         recommendations: recommendations
           .map((r) => ({
-            subject: r.subject_name || 'Unknown',
+            subject: r.subject_name || "Unknown",
             title: r.resource?.title || `${r.topic_name} Guide`,
-            youtubeUrl: r.resource?.youtube_url || null
+            youtubeUrl: r.resource?.youtube_url || null,
           }))
-          .filter(r => r.youtubeUrl), // only include actionable video recommendations
+          .filter((r) => r.youtubeUrl), // only include actionable video recommendations
 
         // Extra details for any legacy clients or deeper debugging
         answered: totalAttempted,
