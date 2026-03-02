@@ -12,6 +12,7 @@
  *   SUPABASE_SERVICE_KEY — Supabase service_role JWT
  */
 
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import assessmentRoutes from "./assessmentRoutes.js";

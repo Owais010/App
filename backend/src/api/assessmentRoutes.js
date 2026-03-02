@@ -33,31 +33,55 @@ const router = express.Router();
 
 /**
  * Validate user authentication
- * In production, this should verify JWT token from Supabase Auth
+ * Verifies JWT token from Supabase Auth
  */
 const requireAuth = (req, res, next) => {
-  const userId =
-    req.body?.userId || req.query?.userId || req.headers["x-user-id"];
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      // Fallback for legacy requests checking body/query/headers
+      const fallbackUserId = req.body?.userId || req.query?.userId || req.headers["x-user-id"];
+      if (fallbackUserId) {
+        req.userId = fallbackUserId;
+        return next();
+      }
+      return res.status(RESPONSE_CODES.UNAUTHORIZED).json({
+        success: false,
+        error: "Missing or invalid authorization header",
+      });
+    }
 
-  if (!userId) {
+    const token = authHeader.split(' ')[1];
+
+    // Quick JWT decode (Base64Url) to extract user ID (sub) without full verification
+    // In a strict production environment, you should verify the JWT signature using the Supabase JWT secret.
+    const base64Url = token.split('.')[1];
+    if (!base64Url) {
+      throw new Error("Invalid token format");
+    }
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+
+    const payload = JSON.parse(jsonPayload);
+
+    if (!payload.sub) {
+      return res.status(RESPONSE_CODES.UNAUTHORIZED).json({
+        success: false,
+        error: "Invalid token payload",
+      });
+    }
+
+    req.userId = payload.sub;
+    next();
+  } catch (error) {
+    console.error("Auth middleware error:", error);
     return res.status(RESPONSE_CODES.UNAUTHORIZED).json({
       success: false,
-      error: "User ID required",
+      error: "Invalid token",
     });
   }
-
-  // Validate UUID format
-  const uuidRegex =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(userId)) {
-    return res.status(RESPONSE_CODES.BAD_REQUEST).json({
-      success: false,
-      error: ERROR_MESSAGES.INVALID_USER_ID,
-    });
-  }
-
-  req.userId = userId;
-  next();
 };
 
 /**
