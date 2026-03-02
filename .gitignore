@@ -9,6 +9,8 @@ build/
 out/
 .next/
 
+
+
 # Python / ML
 venv/
 .venv/
