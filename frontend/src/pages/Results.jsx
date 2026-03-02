@@ -4,16 +4,11 @@ import { motion } from 'framer-motion'
 import {
     Trophy, Target, RotateCcw, ArrowRight, Star, TrendingUp, Loader2
 } from 'lucide-react'
-import {
-    RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
-    ResponsiveContainer,
-} from 'recharts'
 import confetti from 'canvas-confetti'
 import Card from '../components/Card'
 import Button from '../components/Button'
 import { ProgressRing } from '../components/ProgressBar'
 import PageTransition from '../components/PageTransition'
-import { performanceData } from '../data'
 import { useAuth } from '../context/AuthContext'
 import { finishAssessment } from '../lib/api'
 import { getMLPrediction } from '../lib/mlService'
@@ -58,7 +53,7 @@ export default function Results() {
                 };
                 const res = await finishAssessment(user.sessionToken, payload);
                 if (res.success) {
-                    setResultData(res.data);
+                    setResultData(res);
                 } else {
                     setError(res.error || 'Failed to submit assessment');
                 }
@@ -145,7 +140,7 @@ export default function Results() {
                     origin: { x: 1, y: 0.7 },
                     colors: ['#6C63FF', '#22C55E', '#06B6D4'],
                 })
-                if (Date.now() < end) requestAnimationFrame(frame)
+                if (Date.now() < endConfetti) requestAnimationFrame(frame)
             }
             frame()
         }

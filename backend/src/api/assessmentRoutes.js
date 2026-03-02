@@ -24,6 +24,7 @@ import {
   ERROR_MESSAGES,
 } from "../services/quizEngine/index.js";
 import { getDashboardSummary } from "../services/dashboardService.js";
+import supabaseAdmin from "../services/quizEngine/supabaseAdmin.js";
 
 const router = express.Router();
 
@@ -32,17 +33,36 @@ const router = express.Router();
 // ============================================================================
 
 /**
- * Validate user authentication
- * In production, this should verify JWT token from Supabase Auth
+ * Validate user authentication.
+ * Extracts userId from:
+ *   1. Authorization: Bearer <supabase_jwt> → decodes sub claim
+ *   2. Body/query/header fallbacks (userId, x-user-id)
  */
 const requireAuth = (req, res, next) => {
-  const userId =
+  let userId =
     req.body?.userId || req.query?.userId || req.headers["x-user-id"];
+
+  // Extract user ID from Supabase JWT if Authorization header is present
+  if (!userId) {
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.slice(7);
+        const payload = JSON.parse(
+          Buffer.from(token.split(".")[1], "base64").toString(),
+        );
+        userId = payload.sub; // Supabase JWT 'sub' claim = user UUID
+      } catch {
+        // Invalid token format — fall through to error below
+      }
+    }
+  }
 
   if (!userId) {
     return res.status(RESPONSE_CODES.UNAUTHORIZED).json({
       success: false,
-      error: "User ID required",
+      error:
+        "User ID required. Send Authorization: Bearer <token>, userId in body/query, or x-user-id header.",
     });
   }
 
@@ -112,11 +132,53 @@ router.post("/start-assessment", requireAuth, async (req, res) => {
     }
 
     // Generate quiz
+    // Resolve subjectFilter (slug like 'data-structures' or abbreviation like 'oop') to a real subjectId UUID
+    let resolvedSubjectId = subjectId;
+    if (!resolvedSubjectId && subjectFilter) {
+      try {
+        // Common abbreviation mappings
+        const slugAliases = {
+          oop: "object-oriented programming",
+          dbms: "database management systems",
+          os: "operating systems",
+          cn: "computer networks",
+          dsa: "data structures",
+          "logical reasoning": "logical",
+        };
+
+        // Convert slug to searchable name: 'data-structures' -> 'data structures'
+        const normalizedFilter = subjectFilter.replace(/-/g, " ").toLowerCase();
+        const searchName = slugAliases[normalizedFilter] || normalizedFilter;
+
+        const { data: subjects } = await supabaseAdmin
+          .from("subjects")
+          .select("id, name");
+
+        if (subjects) {
+          const match = subjects.find((s) => {
+            const sName = s.name.toLowerCase();
+            return (
+              sName.includes(searchName) ||
+              searchName.includes(sName.split("(")[0].trim().toLowerCase())
+            );
+          });
+          if (match) {
+            resolvedSubjectId = match.id;
+            console.log(
+              `Resolved subject filter '${subjectFilter}' -> '${match.name}' (${match.id})`,
+            );
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to resolve subjectFilter:", err.message);
+      }
+    }
+
     const result = await generateQuiz({
       userId: req.userId,
       type,
       numQuestions,
-      subjectId,
+      subjectId: resolvedSubjectId,
       topicId,
       subjectFilter,
     });

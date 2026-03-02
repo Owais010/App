@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Clock, ArrowRight, ChevronLeft, Star, Loader2 } from 'lucide-react'
@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext'
 export default function Quiz() {
     const { user } = useAuth()
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
     const subject = searchParams.get('subject') || ''
     const count = Math.min(Number(searchParams.get('count')) || 5, 10)
     const difficulty = searchParams.get('difficulty') || 'medium'
@@ -27,12 +28,18 @@ export default function Quiz() {
             if (!user?.sessionToken) return;
             try {
                 const payload = {
-                    type,
+                    type: subject ? 'practice' : type,
                     numQuestions: count,
                 };
                 // If a valid UUID subject is passed, include it
                 if (subject && subject.length > 20) {
                     payload.subjectId = subject;
+                } else if (subject) {
+                    // Slug-based subject — pass as subjectFilter for backend name matching
+                    payload.subjectFilter = subject;
+                }
+                if (difficulty) {
+                    payload.difficulty = difficulty;
                 }
                 const res = await startAssessment(user.sessionToken, payload);
                 if (res.success) {
@@ -91,7 +98,8 @@ export default function Quiz() {
                 handleNext()
             }
         },
-        [selected, currentIndex, showFeedback]
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [selected, currentIndex, showFeedback, questions, answers, responseTimes, confidence, questionStartTime]
     )
 
     useEffect(() => {

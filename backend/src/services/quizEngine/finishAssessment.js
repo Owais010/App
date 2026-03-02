@@ -205,8 +205,9 @@ class AssessmentCompleter {
   }
 
   /**
-   * Insert user answers in bulk with full ML context (Phase 1 data logging).
-   * Includes: difficulty, subject_id, topic_id, time_taken, prior stats.
+   * Insert user answers in bulk.
+   * Actual DB columns: user_id, assessment_id, question_id, topic_id,
+   * selected_option, is_correct, difficulty, answered_at
    */
   async insertUserAnswers(
     userId,
@@ -214,56 +215,21 @@ class AssessmentCompleter {
     processedAnswers,
     priorTopicStats = {},
   ) {
-    const rows = processedAnswers.map((answer) => {
-      const prior = priorTopicStats[answer.topic_id] || {
-        prior_attempts: 0,
-        prior_correct: 0,
-        days_since_last: null,
-      };
-
-      return {
-        user_id: userId,
-        assessment_id: assessmentId,
-        question_id: answer.question_id,
-        selected_option: answer.selected_option || null,
-        is_correct: answer.is_correct,
-        answered_at: new Date().toISOString(),
-        // ML-critical fields (Phase 1) — only written if columns exist
-        difficulty: answer.difficulty || null,
-        subject_id: answer.subject_id || null,
-        topic_id: answer.topic_id || null,
-        time_taken: answer.time_taken_seconds || 0,
-        prior_attempts: prior.prior_attempts,
-        prior_correct: prior.prior_correct,
-        days_since_last: prior.days_since_last,
-      };
-    });
+    const rows = processedAnswers.map((answer) => ({
+      user_id: userId,
+      assessment_id: assessmentId,
+      question_id: answer.question_id,
+      topic_id: answer.topic_id || null,
+      selected_option: answer.selected_option || null,
+      is_correct: answer.is_correct,
+      difficulty: answer.difficulty || null,
+      answered_at: new Date().toISOString(),
+    }));
 
     const { error } = await this.supabase.from("user_answers").insert(rows);
 
     if (error) {
-      // If new columns don't exist yet, fall back to minimal insert
-      if (error.message && error.message.includes("column")) {
-        console.warn(
-          "ML columns not yet migrated, falling back to minimal insert",
-        );
-        const minimalRows = processedAnswers.map((answer) => ({
-          user_id: userId,
-          assessment_id: assessmentId,
-          question_id: answer.question_id,
-          selected_option: answer.selected_option || null,
-          is_correct: answer.is_correct,
-          answered_at: new Date().toISOString(),
-        }));
-        const { error: fallbackErr } = await this.supabase
-          .from("user_answers")
-          .insert(minimalRows);
-        if (fallbackErr) {
-          throw new Error(`Failed to insert answers: ${fallbackErr.message}`);
-        }
-      } else {
-        throw new Error(`Failed to insert answers: ${error.message}`);
-      }
+      throw new Error(`Failed to insert answers: ${error.message}`);
     }
   }
 
@@ -691,8 +657,8 @@ class AssessmentCompleter {
 
       const answeredSet = new Set((answered || []).map((a) => a.question_id));
 
-      // Update assessment status
-      if (assessment.status === "pending") {
+      // Update assessment status if not already in_progress
+      if (assessment.status !== "in_progress") {
         await this.supabase
           .from("assessments")
           .update({

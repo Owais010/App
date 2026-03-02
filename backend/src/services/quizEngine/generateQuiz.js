@@ -660,7 +660,7 @@ class QuizGenerator {
         .insert({
           user_id: userId,
           assessment_type: type,
-          status: "pending",
+          status: "in_progress",
           total_questions: finalQuestions.length,
           started_at: new Date().toISOString(),
         })

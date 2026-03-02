@@ -41,7 +41,7 @@ export default function Signup() {
         if (!validate()) return
         setLoading(true)
         try {
-            const data = await signUp(email, password)
+            const data = await signUp(email, password, { full_name: name.trim() })
             if (data?.session) {
                 toast.success('Account created! Welcome to AdaptIQ.')
             } else {
