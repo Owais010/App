@@ -51,7 +51,11 @@ export function AuthProvider({ children }) {
 
         initializeAuth()
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                // We'll handle navigation in the component or App.jsx if needed, 
+                // but Supabase usually handles the initial redirect to the site.
+            }
             if (session?.user) {
                 await handleUserSession(session.user, session.access_token)
             } else {
@@ -87,7 +91,19 @@ export function AuthProvider({ children }) {
         if (error) throw error
     }
 
-    const value = { user, loading, signUp, signIn, signInWithGoogle, signOut }
+    const resetPassword = async (email) => {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/reset-password`,
+        })
+        if (error) throw error
+    }
+
+    const updatePassword = async (newPassword) => {
+        const { error } = await supabase.auth.updateUser({ password: newPassword })
+        if (error) throw error
+    }
+
+    const value = { user, loading, signUp, signIn, signInWithGoogle, signOut, resetPassword, updatePassword }
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
