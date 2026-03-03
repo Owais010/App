@@ -14,8 +14,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ app/
 COPY training/ training/
-COPY data/ data/
-COPY models/ models/
+
+# Create data and models directories (both are generated at build time)
+RUN mkdir -p data models
 
 # Generate training data and train models at build time
 RUN python -m training.train_all --rows 10000
