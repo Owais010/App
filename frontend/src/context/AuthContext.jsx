@@ -18,7 +18,8 @@ export function AuthProvider({ children }) {
                 userId: sessionUser.id,
                 sessionToken: token,
                 fullName: profileRes?.profile?.full_name || sessionUser.user_metadata?.full_name || 'Learner',
-                profile: profileRes?.profile || null
+                profile: profileRes?.profile || null,
+                role: profileRes?.profile?.role || 'user'
             })
         } catch (err) {
             console.error("Profile fetch failed", err);
@@ -26,7 +27,8 @@ export function AuthProvider({ children }) {
                 ...sessionUser,
                 userId: sessionUser.id,
                 sessionToken: token,
-                fullName: sessionUser.user_metadata?.full_name || 'Learner'
+                fullName: sessionUser.user_metadata?.full_name || 'Learner',
+                role: 'user' // Default safe fallback
             })
         } finally {
             setLoading(false)

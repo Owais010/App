@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { ToastProvider } from './components/Toast'
 import ProtectedRoute from './components/ProtectedRoute'
+import AdminRoute from './components/AdminRoute'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
@@ -14,6 +15,14 @@ import Results from './pages/Results'
 import Achievements from './pages/Achievements'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
+
+// Admin Panel
+import AdminLayout from './components/admin/AdminLayout'
+import AdminDashboard from './pages/admin/AdminDashboard'
+import UserManagement from './pages/admin/UserManagement'
+import QuestionBankManager from './pages/admin/QuestionBankManager'
+import LearningResourcesManager from './pages/admin/LearningResourcesManager'
+
 import { useEffect } from 'react'
 
 function ScrollToTop() {
@@ -35,6 +44,22 @@ function AnimatedRoutes() {
                 <Route path="/signup" element={<Signup />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
+
+                {/* Admin Routes grouped under /admin using nested routing */}
+                <Route
+                    path="/admin"
+                    element={
+                        <AdminRoute>
+                            <AdminLayout />
+                        </AdminRoute>
+                    }
+                >
+                    <Route index element={<AdminDashboard />} />
+                    <Route path="users" element={<UserManagement />} />
+                    <Route path="questions" element={<QuestionBankManager />} />
+                    <Route path="resources" element={<LearningResourcesManager />} />
+                </Route>
+
                 <Route
                     path="/dashboard"
                     element={

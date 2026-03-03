@@ -506,6 +506,7 @@ router.get("/profile", requireAuth, async (req, res) => {
         full_name: profileRow.full_name || null,
         avatar_url: profileRow.avatar_url || null,
         target_role: profileRow.target_role || null,
+        role: profileRow.role || 'user',
         ...perfProfile,
       },
     });
