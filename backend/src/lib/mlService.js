@@ -7,9 +7,8 @@
  * @version 2.0.0
  */
 
-const _env = (typeof import.meta !== "undefined" && import.meta.env) || {};
-const ML_API_URL = _env.VITE_ML_API_URL || "http://localhost:8000";
-const ML_API_KEY = _env.VITE_ML_API_KEY || "default_test_key";
+const ML_API_URL = process.env.ML_API_URL || "http://localhost:8000";
+const ML_API_KEY = process.env.ML_API_KEY || "default_test_key";
 const ML_TIMEOUT_MS = 5000;
 
 // ─────────────────────────────────────────────────────────────────────────────
