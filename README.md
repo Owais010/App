@@ -1,5 +1,5 @@
 # AdaptIQ — Adaptive Learning Platform
-
+## Live URL = https://adapt--iq.vercel.app/
 AI-powered adaptive quiz platform that personalizes difficulty using ML models trained on user performance data.
 
 ```
