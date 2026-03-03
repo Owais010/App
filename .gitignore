@@ -61,4 +61,3 @@ coverage/
 # Misc
 .gemini/
 .system_generated/
-RUN_INSTRUCTIONS.md
