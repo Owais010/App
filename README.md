@@ -54,7 +54,7 @@ App/
 ```bash
 git clone <your-repo-url>
 cd App
-```
+```    
 
 ### Step 2: Set up the database
 
