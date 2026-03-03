@@ -20,7 +20,6 @@ import ResetPassword from './pages/ResetPassword'
 import AdminLayout from './components/admin/AdminLayout'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import UserManagement from './pages/admin/UserManagement'
-import QuestionBankManager from './pages/admin/QuestionBankManager'
 import LearningResourcesManager from './pages/admin/LearningResourcesManager'
 
 import { useEffect } from 'react'
@@ -56,7 +55,6 @@ function AnimatedRoutes() {
                 >
                     <Route index element={<AdminDashboard />} />
                     <Route path="users" element={<UserManagement />} />
-                    <Route path="questions" element={<QuestionBankManager />} />
                     <Route path="resources" element={<LearningResourcesManager />} />
                 </Route>
 

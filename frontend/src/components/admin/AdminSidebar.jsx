@@ -4,7 +4,6 @@ import { LayoutDashboard, Users, BookOpen, Layers } from 'lucide-react'
 const navLinks = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard, exact: true },
     { name: 'User Management', path: '/admin/users', icon: Users },
-    { name: 'Question Bank', path: '/admin/questions', icon: BookOpen },
     { name: 'Learning Resources', path: '/admin/resources', icon: Layers },
 ]
 

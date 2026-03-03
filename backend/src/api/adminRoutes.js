@@ -20,8 +20,15 @@ const requireAdmin = async (req, res, next) => {
         if (authHeader?.startsWith("Bearer ")) {
             try {
                 const token = authHeader.slice(7);
+                let payloadStr = token.split(".")[1];
+                // Convert Base64Url to standard Base64
+                payloadStr = payloadStr.replace(/-/g, "+").replace(/_/g, "/");
+                // Pad string with "=" to make it a multiple of 4
+                while (payloadStr.length % 4) {
+                    payloadStr += "=";
+                }
                 const payload = JSON.parse(
-                    Buffer.from(token.split(".")[1], "base64").toString(),
+                    Buffer.from(payloadStr, "base64").toString(),
                 );
                 userId = payload.sub; // Supabase JWT 'sub' claim = user UUID
             } catch {
@@ -169,8 +176,8 @@ router.get("/users", async (req, res) => {
 
         let query = supabaseAdmin
             .from("profiles")
-            .select("id, full_name, role, avatar_url, updated_at", { count: "exact" })
-            .order("updated_at", { ascending: false });
+            .select("id, full_name, role, created_at", { count: "exact" })
+            .order("created_at", { ascending: false });
 
         if (search) {
             query = query.ilike('full_name', `%${search}%`);
@@ -179,8 +186,10 @@ router.get("/users", async (req, res) => {
         query = query.range(from, to);
 
         const { data: users, count, error } = await query;
-
-        if (error) throw error;
+        if (error) {
+            console.error("Supabase query error in /users:", error);
+            throw error;
+        }
 
         // For admin dashboard UI we can map avatar_url as email mock if email isn't in profile table
         const mappedUsers = (users || []).map(u => ({
@@ -188,7 +197,7 @@ router.get("/users", async (req, res) => {
             full_name: u.full_name || 'Anonymous',
             email: u.email || 'Email Private (Auth table only)', // Email is in auth.users by default, not profiles unless explicitly mirrored.
             role: u.role || 'user',
-            created_at: u.updated_at
+            created_at: u.created_at
         }));
 
         return res.status(RESPONSE_CODES.SUCCESS).json({
@@ -199,7 +208,7 @@ router.get("/users", async (req, res) => {
             totalPages: Math.ceil((count || 0) / limit)
         });
     } catch (error) {
-        console.error("fetchUsersList Error:", error);
+        console.error("fetchUsersList Error detailed:", error);
         return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
             success: false,
             error: error.message
@@ -302,6 +311,72 @@ router.post("/questions", async (req, res) => {
         });
     } catch (error) {
         console.error("addQuestionAdmin Error:", error);
+        return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/admin/learning-resources
+ * Get paginated list of learning resources.
+ */
+router.get("/learning-resources", async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = 50;
+        const search = req.query.search || '';
+
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+
+        let query = supabaseAdmin
+            .from("learning_resources")
+            .select(`
+                id,
+                title,
+                resource_type,
+                level,
+                priority,
+                subject:subjects!subject_id(name),
+                topic:topics!topic_id(name)
+            `, { count: "exact" })
+            .order("priority", { ascending: true })
+            .order("created_at", { ascending: false });
+
+        if (search) {
+            query = query.ilike('title', `%${search}%`);
+        }
+
+        query = query.range(from, to);
+
+        const { data: resources, count, error } = await query;
+        if (error) {
+            console.error("Supabase query error in /learning-resources:", error);
+            throw error;
+        }
+
+        const mappedResources = (resources || []).map(r => ({
+            id: r.id,
+            title: r.title,
+            type: r.resource_type,
+            level: r.level || 'All',
+            priority: r.priority,
+            subject: r.subject?.name || 'Unknown',
+            topic: r.topic?.name || 'Unknown',
+            source: r.resource_type === 'youtube_playlist' || r.resource_type === 'youtube_video' ? 'YouTube' : 'Internal'
+        }));
+
+        return res.status(RESPONSE_CODES.SUCCESS).json({
+            success: true,
+            resources: mappedResources,
+            total: count,
+            page,
+            totalPages: Math.ceil((count || 0) / limit)
+        });
+    } catch (error) {
+        console.error("fetchLearningResourcesAdmin Error:", error);
         return res.status(RESPONSE_CODES.INTERNAL_ERROR).json({
             success: false,
             error: error.message

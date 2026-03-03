@@ -49,8 +49,15 @@ const requireAuth = (req, res, next) => {
     if (authHeader?.startsWith("Bearer ")) {
       try {
         const token = authHeader.slice(7);
+        let payloadStr = token.split(".")[1];
+        // Convert Base64Url to standard Base64
+        payloadStr = payloadStr.replace(/-/g, "+").replace(/_/g, "/");
+        // Pad string with "=" to make it a multiple of 4
+        while (payloadStr.length % 4) {
+          payloadStr += "=";
+        }
         const payload = JSON.parse(
-          Buffer.from(token.split(".")[1], "base64").toString(),
+          Buffer.from(payloadStr, "base64").toString(),
         );
         userId = payload.sub; // Supabase JWT 'sub' claim = user UUID
       } catch {
